@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.JournalReferenceCollisionError = void 0;
 exports.duplicateKeyDetails = duplicateKeyDetails;
 exports.matchingJournalIdentity = matchingJournalIdentity;
 exports.persistedJournalMatchesIdentity = persistedJournalMatchesIdentity;
@@ -63,6 +64,19 @@ function matchingJournalIdentity(error, candidates) {
     }
     return null;
 }
+/**
+ * The receipt reference already belongs to a different payment in this company.
+ * The existing journal is not reassigned and is not treated as this payment's journal.
+ */
+class JournalReferenceCollisionError extends Error {
+    constructor(reference, otherPaymentId) {
+        super(`Receipt reference ${reference} already belongs to payment ${otherPaymentId}. It was not reassigned.`);
+        this.code = 'JOURNAL_REFERENCE_COLLISION';
+        this.statusCode = 409;
+        this.name = 'JournalReferenceCollisionError';
+    }
+}
+exports.JournalReferenceCollisionError = JournalReferenceCollisionError;
 function persistedJournalMatchesIdentity(journal, identity) {
     if (!journal)
         return false;

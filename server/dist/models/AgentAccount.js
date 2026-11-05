@@ -129,7 +129,11 @@ const agentPayoutSchema = new mongoose_1.Schema({
     },
     processedAt: {
         type: Date
-    }
+    },
+    originalTransactionDate: { type: Date, required: false },
+    accountingDate: { type: Date, required: false },
+    settlementDate: { type: Date, required: false },
+    bankPaymentDate: { type: Date, required: false }
 }, { _id: true });
 const agentAccountSchema = new mongoose_1.Schema({
     agentId: {

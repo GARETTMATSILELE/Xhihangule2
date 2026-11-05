@@ -8,6 +8,7 @@ import { GL } from './tax/chartAccounts';
 import { markObligationsPaid, outstandingForObligation } from './taxObligationService';
 import { roundMoney } from '../utils/money';
 import { AppError } from '../middleware/errorHandler';
+import { resolveAccountingDates } from './accountingDatePolicy';
 import type { CanonicalTaxType } from './tax/taxTypes';
 
 const toId = (value: string) => new mongoose.Types.ObjectId(value);
@@ -96,7 +97,10 @@ export async function recordZimraPayment(input: {
     description: `ZIMRA payment ${input.paymentReference || input.zimraReference || ''}`.trim(),
     sourceModule: 'tax',
     sourceId: `taxpay:${identity}`,
-    transactionDate: input.paymentDate,
+    transactionDate: resolveAccountingDates({
+      accountingDate: input.paymentDate,
+      bankPaymentDate: input.paymentDate
+    }).accountingDate,
     createdBy: input.createdBy,
     lines
   });

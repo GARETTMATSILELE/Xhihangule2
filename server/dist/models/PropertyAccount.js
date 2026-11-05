@@ -255,6 +255,10 @@ const OwnerPayoutSchema = new mongoose_1.Schema({
     notes: {
         type: String
     },
+    originalTransactionDate: { type: Date, required: false },
+    accountingDate: { type: Date, required: false },
+    settlementDate: { type: Date, required: false },
+    bankPaymentDate: { type: Date, required: false },
     createdAt: {
         type: Date,
         default: Date.now

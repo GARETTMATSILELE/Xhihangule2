@@ -25,6 +25,7 @@ const vatCalculation_1 = require("./tax/vatCalculation");
 const chartAccounts_1 = require("./tax/chartAccounts");
 const taxObligationService_1 = require("./taxObligationService");
 const transactionDomain_1 = require("./transactionDomain");
+const accountingPeriodService_1 = require("./accountingPeriodService");
 const JournalEntry_1 = require("../models/JournalEntry");
 const JournalLine_1 = require("../models/JournalLine");
 const ChartOfAccount_1 = require("../models/ChartOfAccount");
@@ -82,6 +83,21 @@ function ensureJournal(identity, post) {
             if (!(0, journalDuplicateKey_1.persistedJournalMatchesIdentity)(raced, identity))
                 throw error;
         }
+    });
+}
+function assertReceiptReferenceOwnedByPayment(companyId, reference, paymentId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const existing = yield JournalEntry_1.JournalEntry.findOne({
+            companyId,
+            reference,
+            status: 'posted'
+        }).select('companyId sourceId reference status').lean();
+        if (!existing)
+            return;
+        const sourceId = String(existing.sourceId || '');
+        if (sourceId === paymentId || sourceId.startsWith(`${paymentId}:`))
+            return;
+        throw new journalDuplicateKey_1.JournalReferenceCollisionError(reference, sourceId || 'unknown');
     });
 }
 class AccountingIntegrationService {
@@ -215,6 +231,13 @@ class AccountingIntegrationService {
             const agencyShare = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.agencyShare) || 0);
             if (!(agencyShare > 0) || !payment.companyId)
                 return;
+            yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                companyId: String(payment.companyId),
+                transactionDate: new Date(payment.paymentDate || Date.now()),
+                sourceModule: 'payment',
+                sourceId: String(payment._id),
+                actorId: payment.processedBy ? String(payment.processedBy) : undefined
+            });
             const companyId = payment.companyId;
             const desiredSource = (0, transactionDomain_1.journalPaymentType)(payment) === 'sale' ? 'sales_commission' : 'rental_commission';
             const txDoc = {
@@ -238,19 +261,58 @@ class AccountingIntegrationService {
             });
         });
     }
+    recordReceiptJournalFailure(payment, error) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const companyId = String(payment.companyId || '');
+            const paymentId = String(payment._id || '');
+            if (!mongoose_1.default.Types.ObjectId.isValid(companyId) || !paymentId)
+                return;
+            const failure = error;
+            if (failure === null || failure === void 0 ? void 0 : failure.journalFailureRecorded)
+                return;
+            try {
+                yield AccountingEventLog_1.AccountingEventLog.create({
+                    companyId: new mongoose_1.default.Types.ObjectId(companyId),
+                    eventType: 'payment_sync_failed',
+                    sourceModule: String(payment.paymentType || '') === 'sale' ? 'sale' : 'payment',
+                    sourceId: paymentId,
+                    success: false,
+                    message: (failure === null || failure === void 0 ? void 0 : failure.message) || 'Failed to sync payment to accounting',
+                    metadata: {
+                        paymentReference: payment.referenceNumber,
+                        code: (failure === null || failure === void 0 ? void 0 : failure.code) || 'JOURNAL_POST_FAILED'
+                    }
+                });
+                if (failure && typeof failure === 'object')
+                    failure.journalFailureRecorded = true;
+            }
+            catch (logError) {
+                logger_1.logger.warn('payment_accounting_sync_failed_not_logged', {
+                    paymentId,
+                    companyId,
+                    error: (logError === null || logError === void 0 ? void 0 : logError.message) || logError
+                });
+            }
+        });
+    }
     syncPaymentReceived(payment, opts) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
             const companyId = String(payment.companyId);
             const paymentId = String(payment._id);
             try {
-                if (!(0, accountingPostingPolicy_1.shouldPostJournal)(payment))
-                    return;
-                // Reversal entries are handled by syncPaymentReversed.
-                if (payment === null || payment === void 0 ? void 0 : payment.reversalOfPaymentId)
-                    return;
-                if (Number(payment.amount || 0) < 0)
-                    return;
+                if (!(0, accountingPostingPolicy_1.shouldPostJournal)(payment)) {
+                    return { receiptJournal: 'skipped', reason: (0, accountingPostingPolicy_1.evaluatePermanentAccountingPolicy)(payment).reason || 'policy_skip' };
+                }
+                if (payment === null || payment === void 0 ? void 0 : payment.reversalOfPaymentId) {
+                    return { receiptJournal: 'skipped', reason: 'reversal_row' };
+                }
+                if (Number(payment.amount || 0) < 0) {
+                    return { receiptJournal: 'skipped', reason: 'negative_amount' };
+                }
+                if (Number(payment.amount || 0) === 0) {
+                    return { receiptJournal: 'skipped', reason: 'zero_amount' };
+                }
                 const amount = toMoney(payment.amount || 0);
                 const vatOnCommission = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) || 0);
                 const paymentVat = toMoney((payment === null || payment === void 0 ? void 0 : payment.vatAmount) || 0);
@@ -281,15 +343,22 @@ class AccountingIntegrationService {
                 });
                 const sourceModule = (0, transactionDomain_1.journalPaymentType)(payment) === 'sale' ? 'sale' : 'payment';
                 const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
+                const receiptReference = `PAY-${payment.referenceNumber || paymentId}`;
+                if (!receiptJournal.lines.length || !receiptJournal.balanced) {
+                    const debit = toMoney(receiptJournal.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0));
+                    const credit = toMoney(receiptJournal.lines.reduce((sum, line) => sum + Number(line.credit || 0), 0));
+                    throw new Error(`Journal is unbalanced. debit=${debit}, credit=${credit}`);
+                }
+                yield assertReceiptReferenceOwnedByPayment(companyObjectId, receiptReference, paymentId);
                 if (amount > 0 && receiptJournal.lines.length > 0) {
                     yield ensureJournal({
                         companyId: companyObjectId,
                         sourceModule,
                         sourceId: paymentId,
-                        reference: `PAY-${payment.referenceNumber || paymentId}`
+                        reference: receiptReference
                     }, () => accountingService_1.default.postTransaction({
                         companyId,
-                        reference: `PAY-${payment.referenceNumber || paymentId}`,
+                        reference: receiptReference,
                         description: `Agent collection ${payment.referenceNumber || paymentId} (commission as company revenue; principal funds as client liability)`,
                         sourceModule,
                         sourceId: paymentId,
@@ -314,14 +383,16 @@ class AccountingIntegrationService {
                 yield this.ensurePaymentVatObligations(payment, opts);
                 const agentShare = toMoney(((_l = payment.commissionDetails) === null || _l === void 0 ? void 0 : _l.agentShare) || 0);
                 if (agentShare > 0) {
+                    const commissionReference = `COM-${payment.referenceNumber || paymentId}`;
+                    yield assertReceiptReferenceOwnedByPayment(companyObjectId, commissionReference, paymentId);
                     yield ensureJournal({
                         companyId: companyObjectId,
                         sourceModule: 'commission',
                         sourceId: `${paymentId}:commission`,
-                        reference: `COM-${payment.referenceNumber || paymentId}`
+                        reference: commissionReference
                     }, () => accountingService_1.default.postTransaction({
                         companyId,
-                        reference: `COM-${payment.referenceNumber || paymentId}`,
+                        reference: commissionReference,
                         description: `Auto-post commission payable for ${payment.referenceNumber || paymentId}`,
                         sourceModule: 'commission',
                         sourceId: `${paymentId}:commission`,
@@ -337,6 +408,7 @@ class AccountingIntegrationService {
                         ]
                     }));
                 }
+                return { receiptJournal: 'posted' };
             }
             catch (error) {
                 const failureClass = (0, operationalFailure_1.classifyOperationalFailure)(error);
@@ -347,15 +419,7 @@ class AccountingIntegrationService {
                     failureClass,
                     code: error === null || error === void 0 ? void 0 : error.code
                 });
-                yield AccountingEventLog_1.AccountingEventLog.create({
-                    companyId: new mongoose_1.default.Types.ObjectId(companyId),
-                    eventType: 'payment_sync_failed',
-                    sourceModule: (0, transactionDomain_1.journalPaymentType)(payment) === 'sale' ? 'sale' : 'payment',
-                    sourceId: paymentId,
-                    success: false,
-                    message: (error === null || error === void 0 ? void 0 : error.message) || 'Failed to sync payment to accounting',
-                    metadata: { paymentReference: payment.referenceNumber, failureClass }
-                });
+                yield this.recordReceiptJournalFailure(payment, error);
                 throw error;
             }
         });
@@ -376,6 +440,14 @@ class AccountingIntegrationService {
                 : [];
             if (!originalLines.length)
                 return 'skipped';
+            yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                companyId,
+                transactionDate: new Date(),
+                sourceModule: 'payment',
+                sourceId: `${paymentId}:commission-reversal`,
+                actorId: opts === null || opts === void 0 ? void 0 : opts.createdBy,
+                overrideReason: opts === null || opts === void 0 ? void 0 : opts.reason
+            });
             const already = Array.isArray(account === null || account === void 0 ? void 0 : account.transactions)
                 && account.transactions.some((t) => String((t === null || t === void 0 ? void 0 : t.reversesPaymentId) || '') === paymentId);
             if (already)
@@ -480,6 +552,7 @@ class AccountingIntegrationService {
                             sourceId: `${paymentId}:reversal`,
                             transactionDate: new Date(),
                             createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
+                            periodOverrideReason: opts === null || opts === void 0 ? void 0 : opts.reason,
                             lines
                         }));
                     }
@@ -502,6 +575,7 @@ class AccountingIntegrationService {
                         sourceId: `${paymentId}:commission:reversal`,
                         transactionDate: new Date(),
                         createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
+                        periodOverrideReason: opts === null || opts === void 0 ? void 0 : opts.reason,
                         lines: [
                             { accountCode: '5002', credit: agentShare },
                             {

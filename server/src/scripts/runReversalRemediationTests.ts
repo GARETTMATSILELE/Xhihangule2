@@ -7,6 +7,7 @@
 import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
+import { AccountingPeriod } from '../models/AccountingPeriod';
 import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
 import { Payment } from '../models/Payment';
@@ -27,6 +28,7 @@ import { CommissionService } from '../services/commissionService';
 import { toPaymentCommissionSnapshot } from '../services/propertyCommissionCalculator';
 import { commissionVatFlagsFromPolicy, resolveCommissionVatPolicy } from '../services/vatPolicyService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
+import { utcMonthBounds } from '../services/accountingPeriodService';
 import { ensurePaymentAccountingPosted } from '../services/paymentAccountingReconciliation';
 import { postPaymentAccounting, reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import accountingIntegrationService from '../services/accountingIntegrationService';
@@ -200,6 +202,27 @@ async function main() {
     workspaceType: 'agency',
     taxProfile: { vatRegistered: true, vatNumber: 'ZW-REM', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
   });
+  for (const date of [PAYMENT_DATE, new Date()]) {
+    const bounds = utcMonthBounds(date);
+    const existing = await AccountingPeriod.findOne({
+      companyId: company._id,
+      periodStart: bounds.periodStart,
+      periodEnd: bounds.periodEnd
+    }).select('_id').lean();
+    if (existing) continue;
+    await AccountingPeriod.create({
+      companyId: company._id,
+      financialYear: bounds.periodStart.getUTCFullYear(),
+      period: bounds.periodStart.getUTCMonth() + 1,
+      month: bounds.periodStart.getUTCMonth() + 1,
+      periodStart: bounds.periodStart,
+      periodEnd: bounds.periodEnd,
+      startDate: bounds.periodStart,
+      endDate: bounds.periodEnd,
+      status: 'OPEN',
+      createdBy: user._id
+    });
+  }
   const property = await Property.create({
     companyId: company._id,
     ownerId: user._id,

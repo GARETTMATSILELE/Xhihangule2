@@ -217,6 +217,22 @@ function evaluateAccountingReconciliation(input) {
         if (compared.issue)
             issues.push(compared.issue);
     }
+    if (expected.journal && actual.journalReferenceCollision) {
+        const missingIndex = missing.indexOf('journal');
+        if (missingIndex >= 0)
+            missing.splice(missingIndex, 1);
+        if (!mismatched.includes('journal'))
+            mismatched.push('journal');
+        componentStatus.journal = 'MISMATCHED';
+        issues.push({
+            component: 'journal',
+            expected: paymentId,
+            actual: actual.journalReferenceCollision.otherPaymentId,
+            difference: 'receipt reference belongs to another payment',
+            status: 'MISMATCHED',
+            paymentId
+        });
+    }
     const anyExpected = expected.ownerIncome
         || expected.agentCommission
         || expected.companyCommission

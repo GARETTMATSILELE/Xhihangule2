@@ -35,6 +35,7 @@ const auditService_1 = require("../services/auditService");
 const logger_1 = require("../utils/logger");
 const operationalFailure_1 = require("../services/operationalFailure");
 const paynowCallbackService_1 = require("../services/paynowCallbackService");
+const paynowHash_1 = require("../services/paynowHash");
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Paynow } = require('paynow');
@@ -48,7 +49,8 @@ function readEnv() {
     };
     // Local development can keep keys in server/config/local.paynow.json.
     // Automated tests set PAYNOW_DISABLE_LOCAL_CONFIG so they cannot pick up merchant keys.
-    if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && process.env.NODE_ENV !== 'production' && process.env.PAYNOW_DISABLE_LOCAL_CONFIG !== '1') {
+    // Production never reads that file, including when Azure has not set the variables.
+    if ((!env.INTEGRATION_ID || !env.INTEGRATION_KEY) && (0, paynowHash_1.shouldLoadLocalPaynowConfig)()) {
         try {
             const cfgPath = path_1.default.resolve(__dirname, '..', '..', 'config', 'local.paynow.json');
             if (fs_1.default.existsSync(cfgPath)) {
@@ -65,6 +67,8 @@ function readEnv() {
             // ignore
         }
     }
+    env.INTEGRATION_ID = (0, paynowHash_1.normalizePaynowCredential)(env.INTEGRATION_ID);
+    env.INTEGRATION_KEY = (0, paynowHash_1.normalizePaynowCredential)(env.INTEGRATION_KEY);
     return env;
 }
 function deploymentForRequest(req) {
@@ -97,7 +101,23 @@ function getPaynowForRequest(req) {
     const paynow = new Paynow(env.INTEGRATION_ID, env.INTEGRATION_KEY);
     paynow.resultUrl = decision.resultUrl;
     paynow.returnUrl = decision.returnUrl;
+    (0, paynowHash_1.installCorrectPaynowHashing)(paynow);
     return paynow;
+}
+function safePaynowError(value) {
+    return String(value || '')
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, '[redacted]')
+        .slice(0, 180);
+}
+function safeInitiationDiag(fields, gatewayError) {
+    const expected = String(gatewayError || '').match(/start with:\s*([0-9A-Fa-f]{6})/i);
+    return {
+        hashPrefix: (fields === null || fields === void 0 ? void 0 : fields.hash) ? String(fields.hash).slice(0, 6) : undefined,
+        gatewayHashPrefix: expected ? expected[1].toUpperCase() : undefined,
+        amountSent: fields === null || fields === void 0 ? void 0 : fields.amount,
+        descriptionLength: (fields === null || fields === void 0 ? void 0 : fields.additionalinfo) ? fields.additionalinfo.length : 0,
+        fieldOrder: fields ? Object.keys(fields).filter((name) => name.toLowerCase() !== 'hash') : undefined
+    };
 }
 function paynowLog(level, event, fields) {
     logger_1.logger[level](event, fields);
@@ -194,17 +214,13 @@ function initiatePaynowCheckout(req, input) {
         const paynow = getPaynowForRequest(req);
         const payment = paynow.createPayment(ref, email || '');
         payment.add(input.description || `Mantis ${plan} ${cycle} subscription`, priced);
+        const initiation = typeof paynow.build === 'function' ? paynow.build(payment) : undefined;
         let response;
         try {
             response = yield paynow.send(payment);
         }
         catch (error) {
-            paynowLog('warn', 'paynow_checkout_rejected', {
-                correlationId: ref,
-                reference: ref,
-                paymentSessionId: String(session._id),
-                code: 'PAYNOW_CHECKOUT_FAILED'
-            });
+            paynowLog('warn', 'paynow_checkout_rejected', Object.assign({ correlationId: ref, reference: ref, paymentSessionId: String(session._id), code: 'PAYNOW_CHECKOUT_FAILED', paynowError: safePaynowError(error === null || error === void 0 ? void 0 : error.message) }, safeInitiationDiag(initiation, error === null || error === void 0 ? void 0 : error.message)));
             yield (0, auditService_1.recordAuditEvent)({
                 userId: session.userId ? String(session.userId) : undefined,
                 companyId: String(session.companyId),
@@ -226,12 +242,7 @@ function initiatePaynowCheckout(req, input) {
                 status: 'failure',
                 metadata: { code: 'PAYNOW_CHECKOUT_FAILED' }
             });
-            paynowLog('warn', 'paynow_checkout_rejected', {
-                correlationId: ref,
-                reference: ref,
-                paymentSessionId: String(session._id),
-                code: 'PAYNOW_CHECKOUT_FAILED'
-            });
+            paynowLog('warn', 'paynow_checkout_rejected', Object.assign({ correlationId: ref, reference: ref, paymentSessionId: String(session._id), code: 'PAYNOW_CHECKOUT_FAILED', paynowError: safePaynowError(response === null || response === void 0 ? void 0 : response.error) }, safeInitiationDiag(initiation, response === null || response === void 0 ? void 0 : response.error)));
             const error = httpError(String((response === null || response === void 0 ? void 0 : response.error) || 'Failed to create Paynow payment'), 502, 'PAYNOW_CHECKOUT_FAILED');
             throw error;
         }
@@ -429,9 +440,12 @@ function getStatus(_req, res) {
         const deployment = deploymentForRequest(_req);
         return res.json({
             status: state.configured ? 'ok' : 'disabled',
+            build: String(process.env.GIT_SHA || '').slice(0, 12) || null,
             mode: state.mode,
+            integrationId: env.INTEGRATION_ID || null,
             hasIntegrationId: Boolean(env.INTEGRATION_ID),
             hasIntegrationKey: Boolean(env.INTEGRATION_KEY),
+            integrationKeyLength: env.INTEGRATION_KEY ? env.INTEGRATION_KEY.length : 0,
             resultHost: deployment.resultHost || null,
             resultPath: deployment.resultPath || null,
             returnHost: deployment.returnHost || null,

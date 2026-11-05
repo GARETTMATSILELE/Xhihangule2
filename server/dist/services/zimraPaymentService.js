@@ -24,6 +24,7 @@ const chartAccounts_1 = require("./tax/chartAccounts");
 const taxObligationService_1 = require("./taxObligationService");
 const money_1 = require("../utils/money");
 const errorHandler_1 = require("../middleware/errorHandler");
+const accountingDatePolicy_1 = require("./accountingDatePolicy");
 const toId = (value) => new mongoose_1.default.Types.ObjectId(value);
 function recordZimraPayment(input) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -96,7 +97,10 @@ function recordZimraPayment(input) {
             description: `ZIMRA payment ${input.paymentReference || input.zimraReference || ''}`.trim(),
             sourceModule: 'tax',
             sourceId: `taxpay:${identity}`,
-            transactionDate: input.paymentDate,
+            transactionDate: (0, accountingDatePolicy_1.resolveAccountingDates)({
+                accountingDate: input.paymentDate,
+                bankPaymentDate: input.paymentDate
+            }).accountingDate,
             createdBy: input.createdBy,
             lines
         });

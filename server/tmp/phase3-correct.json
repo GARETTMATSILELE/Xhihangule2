@@ -1,0 +1,400 @@
+{
+  "collections": {
+    "main": [
+      "ChargeTypes",
+      "accountingeventlogs",
+      "accountingexceptions",
+      "adminauditlogs",
+      "agent_availabilities",
+      "agentaccounts",
+      "audit_logs",
+      "backupjobs",
+      "bankaccounts",
+      "banktransactions",
+      "billingpayments",
+      "buyers",
+      "cashpayments",
+      "chartdatas",
+      "chartofaccounts",
+      "companies",
+      "companybalances",
+      "dashboardkpisnapshots",
+      "deals",
+      "developments",
+      "developmentunits",
+      "duty_roster_shifts",
+      "eventdeduprecords",
+      "files",
+      "individualincometaxadjustments",
+      "individualincometaxpayments",
+      "individualincometaxrecords",
+      "individualrentaltaxpayments",
+      "individualrentaltaxrecords",
+      "individualtaxcompliancereviews",
+      "individualtaxevidence",
+      "individualtaxpacks",
+      "individualtaxprofiles",
+      "individualvatrecords",
+      "inspections",
+      "journalentries",
+      "journallines",
+      "leads",
+      "leases",
+      "leave_requests",
+      "ledgerevents",
+      "levypayments",
+      "maintenance_activities",
+      "maintenance_attachments",
+      "maintenance_contractors",
+      "maintenance_quotes",
+      "maintenance_verifications",
+      "maintenance_work_orders",
+      "maintenancejobs",
+      "maintenancerequests",
+      "notifications",
+      "onboarding_sessions",
+      "owner_banking_details",
+      "owner_documents",
+      "owner_preferences",
+      "owner_rent_notices",
+      "ownership_history",
+      "payment_audit_logs",
+      "payment_sessions",
+      "paymentrequests",
+      "payments",
+      "plans",
+      "platforminvoices",
+      "properties",
+      "propertyowners",
+      "public_holidays",
+      "rentaldeposits",
+      "salescontracts",
+      "salesowners",
+      "subscriptions",
+      "supporttickets",
+      "sync_failures",
+      "systemsettings",
+      "taxperiods",
+      "taxrates",
+      "taxrecords",
+      "taxreviewitems",
+      "taxrules",
+      "tenants",
+      "transactiontaxsnapshots",
+      "trustaccounts",
+      "trustauditlogs",
+      "trusteventfailurelogs",
+      "trustreconciliationresults",
+      "trustsettlements",
+      "trusttransactions",
+      "users",
+      "valuations",
+      "vatrecords",
+      "viewings"
+    ],
+    "accounting": [
+      "bank",
+      "companyaccounts",
+      "invoices",
+      "landlordfinancialtransactions",
+      "propertyaccounts"
+    ]
+  },
+  "agentMain": {
+    "present": true,
+    "count": 546
+  },
+  "agentAccounting": {
+    "present": false,
+    "count": 0
+  },
+  "companies": [
+    {
+      "companyId": "68af4d4b614bce39dd48b6bb",
+      "name": "The Benjamins Realty",
+      "status": null,
+      "completed": 627,
+      "amount": 3822496.1
+    },
+    {
+      "companyId": "693ee49d3c5704b42201c433",
+      "name": "Oaktree real estate",
+      "status": null,
+      "completed": 7,
+      "amount": 6100
+    },
+    {
+      "companyId": "68c70edf7a7c26ce0248fea4",
+      "name": "PROGITECH",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "693a8ae134dc398aad1a852d",
+      "name": "Xhihangule Pvt Ltd",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "693aa76c334917734b94d4a8",
+      "name": "Tanaka Mombe",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "693fb051e9dcc22a31cbd623",
+      "name": "Munyaradzi Nyamandwe",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "6942a92fe03e6aca803811f3",
+      "name": "Zayiya Amigu",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "6942a966e03e6aca80381496",
+      "name": "James Manyika",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "698c442c42234e5108af8a14",
+      "name": "Thomas Zimunhu",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "699db11fee80f453f2f753e1",
+      "name": "Nombulelo Nombulelo",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "69b973a82e26083044dbda69",
+      "name": "⚡Rüyaları Yaşa! 85.000 TL Tek Tıkla Kazan! https://bit.ly/4oHYG3L ⚡",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "69b973af2e26083044dbda8e",
+      "name": "⚡Rüyaları Yaşa! 85.000 TL Tek Tıkla Kazan! https://bit.ly/4oHYG3L ⚡",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "69b973af2e26083044dbda91",
+      "name": "⚡Rüyaları Yaşa! 85.000 TL Tek Tıkla Kazan! https://bit.ly/4oHYG3L ⚡",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    },
+    {
+      "companyId": "6aeb3b309d299af815195e9e",
+      "name": "Mukwanazi",
+      "status": null,
+      "completed": 0,
+      "amount": 0
+    }
+  ],
+  "suppliedCompanyFound": false,
+  "actualCompanyName": "The Benjamins Realty",
+  "identity": {
+    "checked": 634,
+    "balanced": 465,
+    "unbalanced": 169,
+    "unbalancedAmount": 2541095,
+    "commissionSplitMismatch": 0,
+    "vatStored": 25,
+    "gapEqualsFifteenPercent": 40
+  },
+  "unbalancedSamples": [
+    {
+      "paymentId": "6a6863341f228138dedb8d05",
+      "referenceNumber": "REF-1785225904632-94",
+      "amount": 1800,
+      "covered": 1980,
+      "gap": -180,
+      "commission": 162,
+      "vat": 0,
+      "levy": 180,
+      "owner": 1638,
+      "split": 162
+    },
+    {
+      "paymentId": "6909d5efd5708a9c52a876cc",
+      "referenceNumber": "4 Bed Townhouse Unit 1, 19 Trail Road Mt Pleasant, Harare, Zimbabwe",
+      "amount": 100000,
+      "covered": 99250,
+      "gap": 750,
+      "commission": 5000,
+      "vat": 0,
+      "levy": 0,
+      "owner": 94250,
+      "split": 5000
+    },
+    {
+      "paymentId": "6909d61e3095f21c49235c25",
+      "referenceNumber": "4 Bed Townhouse Unit 1, 19 Trail Road Mt Pleasant, Harare, Zimbabwe",
+      "amount": 50000,
+      "covered": 49625,
+      "gap": 375,
+      "commission": 2500,
+      "vat": 0,
+      "levy": 0,
+      "owner": 47125,
+      "split": 2500
+    },
+    {
+      "paymentId": "6909d6413095f21c49235c65",
+      "referenceNumber": "4 Bed Townhouse Unit 1, 19 Trail Road Mt Pleasant, Harare, Zimbabwe",
+      "amount": 26000,
+      "covered": 25805,
+      "gap": 195,
+      "commission": 1300,
+      "vat": 0,
+      "levy": 0,
+      "owner": 24505,
+      "split": 1300
+    },
+    {
+      "paymentId": "690b5240c8ee5c9d54e4e84a",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "690c9c3bd2cb139de38adde4",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "690c9d104580379052fc37a5",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "690ddb1e8f325a110a6d63c5",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero - Unit 1",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "6911df8103e4ce65c17a6e28",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero - Stand 1345",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "6911dfd503e4ce65c17a6e6e",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero - Stand 1345",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "6911e00f03e4ce65c17a6e9d",
+      "referenceNumber": "Rockridge - LakeCity - Lake Chivero - Stand 1345",
+      "amount": 900,
+      "covered": 893.25,
+      "gap": 6.75,
+      "commission": 45,
+      "vat": 0,
+      "levy": 0,
+      "owner": 848.25,
+      "split": 44.99
+    },
+    {
+      "paymentId": "69158f64fa8311f14d3febfe",
+      "referenceNumber": "5 Green Valley Lane Helensvale",
+      "amount": 500000,
+      "covered": 498125,
+      "gap": 1875,
+      "commission": 12500,
+      "vat": 0,
+      "levy": 0,
+      "owner": 485625,
+      "split": 12500
+    }
+  ],
+  "suffolkJournals": [
+    {
+      "id": "69a687642e2608304493632e",
+      "companyId": "68af4d4b614bce39dd48b6bb",
+      "sourceId": "69a687642e260830449362ec",
+      "sourceModule": "sale",
+      "status": "posted"
+    }
+  ],
+  "originalEvents": [],
+  "originalLogs": [],
+  "periodCount": 0,
+  "originalProjections": {
+    "owner": {
+      "present": true,
+      "type": "income",
+      "amount": 1035,
+      "status": "completed"
+    },
+    "company": {
+      "present": true,
+      "type": "income",
+      "amount": 44.620000000000005,
+      "status": null
+    },
+    "agent": {
+      "present": true,
+      "type": "commission",
+      "amount": 66.92999999999999,
+      "status": "completed"
+    }
+  }
+}

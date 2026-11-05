@@ -1518,6 +1518,13 @@ export class PropertyAccountService {
         logger.info(`Skipping income recording for payment ${paymentId} - ${policy.reason}`);
         return;
       }
+      const { assertPeriodAllowsPosting } = await import('./accountingPeriodService');
+      await assertPeriodAllowsPosting({
+        companyId: String(payment.companyId),
+        transactionDate: new Date(payment.paymentDate || Date.now()),
+        sourceModule: 'payment',
+        sourceId: paymentId
+      });
 
       try {
         const completeness = await checkPaymentAccountingCompleteness(payment as any, this.ownerIncomeCompletenessDeps());
@@ -2248,13 +2255,36 @@ export class PropertyAccountService {
       if (account.runningBalance < payoutData.amount) {
         throw new AppError('Insufficient balance for this payout', 400);
       }
+      const payoutCompanyId = await this.resolveCompanyIdForEntity(propertyId);
+      if (!payoutCompanyId) {
+        throw new AppError('Owner payout requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+      }
+      const { assertPeriodAllowsPosting } = await import('./accountingPeriodService');
+      const { resolveAccountingDates } = await import('./accountingDatePolicy');
+      const payoutDates = resolveAccountingDates({
+        originalTransactionDate: (payoutData as any).originalTransactionDate,
+        accountingDate: (payoutData as any).accountingDate,
+        settlementDate: (payoutData as any).settlementDate,
+        bankPaymentDate: (payoutData as any).bankPaymentDate
+      });
+      await assertPeriodAllowsPosting({
+        companyId: payoutCompanyId,
+        transactionDate: payoutDates.accountingDate,
+        sourceModule: 'owner_payout',
+        sourceId: propertyId,
+        actorId: payoutData.processedBy
+      });
 
       const referenceNumber = `PAYOUT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const payoutStatus = payoutData.autoComplete ? 'completed' : 'pending';
 
       const payout: any = {
         amount: payoutData.amount,
-        date: new Date(),
+        date: payoutDates.accountingDate,
+        originalTransactionDate: payoutDates.originalTransactionDate || undefined,
+        accountingDate: payoutDates.accountingDate,
+        settlementDate: payoutDates.settlementDate || undefined,
+        bankPaymentDate: payoutDates.bankPaymentDate || undefined,
         paymentMethod: payoutData.paymentMethod,
         referenceNumber,
         idempotencyKey: idKey,

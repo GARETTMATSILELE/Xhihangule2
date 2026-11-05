@@ -15,6 +15,8 @@ import accountingService from './accountingService';
 import { buildWithholdingJournal } from './tax/principalAgentJournal';
 import { TaxOverride } from '../models/TaxOverride';
 import { AppError } from '../middleware/errorHandler';
+import { assertPeriodAllowsPosting } from './accountingPeriodService';
+import { resolveAccountingDates } from './accountingDatePolicy';
 
 const money = (n: number): number => Number(Number(n || 0).toFixed(2));
 const toObjectId = (id: string): mongoose.Types.ObjectId => new mongoose.Types.ObjectId(id);
@@ -42,6 +44,10 @@ type PostTransactionInput = {
   reference?: string;
   sourceEvent?: string;
   createdBy?: string;
+  originalTransactionDate?: Date;
+  accountingDate?: Date;
+  settlementDate?: Date;
+  bankPaymentDate?: Date;
 };
 
 type CreateTrustAccountInput = {
@@ -269,6 +275,24 @@ class TrustAccountService {
   }
 
   async postTransaction(input: PostTransactionInput) {
+    let originalTransactionDate = input.originalTransactionDate;
+    if (!originalTransactionDate && input.paymentId) {
+      const payment = await Payment.findById(input.paymentId).select('paymentDate').lean();
+      if ((payment as any)?.paymentDate) originalTransactionDate = new Date((payment as any).paymentDate);
+    }
+    const dates = resolveAccountingDates({
+      originalTransactionDate,
+      accountingDate: input.accountingDate,
+      settlementDate: input.settlementDate,
+      bankPaymentDate: input.bankPaymentDate
+    });
+    await assertPeriodAllowsPosting({
+      companyId: input.companyId,
+      transactionDate: dates.accountingDate,
+      actorId: input.createdBy,
+      sourceModule: 'trust',
+      sourceId: input.paymentId
+    });
     await this.ensureIndexes();
     return this.withOptionalTransaction(async (session) => {
       const account = await TrustAccount.findOne({
@@ -331,6 +355,10 @@ class TrustAccountService {
             runningBalance: nextBalance,
             reference: input.reference,
             sourceEvent: input.sourceEvent,
+            originalTransactionDate: dates.originalTransactionDate || undefined,
+            accountingDate: dates.accountingDate,
+            settlementDate: dates.settlementDate || undefined,
+            bankPaymentDate: dates.bankPaymentDate || undefined,
             createdBy: input.createdBy ? toObjectId(input.createdBy) : undefined
           }
         ],
@@ -656,6 +684,13 @@ class TrustAccountService {
         { type: 'VAT', amount: vatOnSale }
       ].filter((d) => d.amount > 0);
 
+      const priorSettlement = await TrustSettlement.findOne({
+        companyId: toObjectId(input.companyId),
+        trustAccountId: account._id
+      }).select('settlementDate').session(session || null).lean();
+      const preservedSettlementDate = (priorSettlement as any)?.settlementDate
+        ? new Date((priorSettlement as any).settlementDate)
+        : saleDate;
       const settlement = await TrustSettlement.findOneAndUpdate(
         { companyId: toObjectId(input.companyId), trustAccountId: account._id },
         {
@@ -664,7 +699,7 @@ class TrustAccountService {
             grossProceeds: derivedSalePrice,
             deductions,
             netPayout: sellerNetPayout,
-            settlementDate: new Date(),
+            settlementDate: preservedSettlementDate,
             cgtSnapshot: {
               ...summaryBase.cgt,
               calculatedAt: new Date(),
@@ -815,7 +850,10 @@ class TrustAccountService {
             type: 'COMMISSION_DEDUCTION',
             debit: deltaToApply,
             reference: `settlement:${settlement._id}:commission`,
-            createdBy: input.createdBy
+            createdBy: input.createdBy,
+            originalTransactionDate: settlement.settlementDate ? new Date(settlement.settlementDate) : undefined,
+            accountingDate: settlement.settlementDate ? new Date(settlement.settlementDate) : undefined,
+            settlementDate: settlement.settlementDate ? new Date(settlement.settlementDate) : undefined
           });
           postedAnyDeduction = true;
           continue;
@@ -915,7 +953,7 @@ class TrustAccountService {
           description: `Withhold ${canonicalTaxType} from seller trust`,
           sourceModule: 'trust',
           sourceId: `trust-tax:${settlement._id}:${canonicalTaxType}`,
-          transactionDate: new Date(),
+          transactionDate: taxPoint,
           createdBy: input.createdBy,
           lines: withholdingLines
         });

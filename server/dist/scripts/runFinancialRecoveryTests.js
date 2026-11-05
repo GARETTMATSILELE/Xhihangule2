@@ -35,6 +35,7 @@ const propertyCommissionCalculator_1 = require("../services/propertyCommissionCa
 const vatPolicyService_1 = require("../services/vatPolicyService");
 const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const paymentAccountingOrchestrator_1 = require("../services/paymentAccountingOrchestrator");
 const ledgerEventService_1 = __importDefault(require("../services/ledgerEventService"));
 const database_1 = require("../config/database");
@@ -77,6 +78,10 @@ function main() {
             name: 'Other Recovery Co', address: '2 Recovery Street', phone: '0770000302', email: 'other-recovery@example.test',
             registrationNumber: 'REC-2', tinNumber: 'REC-TIN-2', country: 'Zimbabwe', ownerId: user._id
         });
+        for (const ownerCompany of [company, other]) {
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: new Date(), createdBy: String(user._id) });
+        }
         const property = yield Property_1.Property.create({
             companyId: company._id, ownerId: user._id, name: 'Recovery House', address: '1 Recovery Road',
             rentalType: 'management', rent: 1800, commission: 15, vatOnCommission: true, vatCommissionTreatment: 'exclusive'

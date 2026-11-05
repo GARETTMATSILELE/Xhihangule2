@@ -15,6 +15,8 @@ import {
 } from './commissionProjection';
 import { computeAgentAccountTotals } from './propertyAccountTotals';
 import { formatAgentCommissionDescription } from '../reporting/rentalPeriod';
+import { assertPeriodAllowsPosting } from './accountingPeriodService';
+import { resolveAccountingDates } from './accountingDatePolicy';
 
 const PAYMENT_OBJECT_ID = /^[a-f0-9]{24}$/i;
 
@@ -156,9 +158,19 @@ export class AgentAccountService {
   async reverseCommissionForPayment(paymentId: string, reason?: string): Promise<'reversed' | 'absent'> {
     try {
       const payment = await Payment.findById(paymentId)
-        .select('_id paymentDate referenceNumber paymentType rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
+        .select('_id companyId paymentDate referenceNumber paymentType rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
         .lean();
       if (!payment) return 'absent';
+      if (!(payment as any).companyId) {
+        throw new AppError('Agent commission reversal requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+      }
+      await assertPeriodAllowsPosting({
+        companyId: String((payment as any).companyId),
+        transactionDate: new Date(),
+        sourceModule: 'agent_commission',
+        sourceId: `${paymentId}:reversal`,
+        overrideReason: reason
+      });
       let handled = false;
 
       const accounts = await AgentAccount.find({ 'transactions.paymentId': String(paymentId) });
@@ -327,6 +339,26 @@ export class AgentAccountService {
     paymentId?: string;
   }): Promise<IAgentAccount> {
     try {
+      let companyId: string | undefined;
+      let transactionDate = commissionData.date;
+      if (commissionData.paymentId && mongoose.Types.ObjectId.isValid(String(commissionData.paymentId))) {
+        const source = await Payment.findById(commissionData.paymentId).select('companyId paymentDate').lean();
+        companyId = (source as any)?.companyId ? String((source as any).companyId) : undefined;
+        if ((source as any)?.paymentDate) transactionDate = new Date((source as any).paymentDate);
+      }
+      if (!companyId) {
+        const agent = await User.findById(agentId).select('companyId').lean();
+        companyId = (agent as any)?.companyId ? String((agent as any).companyId) : undefined;
+      }
+      if (!companyId) {
+        throw new AppError('Agent commission requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+      }
+      await assertPeriodAllowsPosting({
+        companyId,
+        transactionDate,
+        sourceModule: 'agent_commission',
+        sourceId: commissionData.paymentId
+      });
       const account = await this.getOrCreateAgentAccount(agentId);
 
       if (commissionData.paymentId) {
@@ -445,8 +477,28 @@ export class AgentAccountService {
     recipientId: string;
     recipientName: string;
     notes?: string;
+    originalTransactionDate?: Date;
+    accountingDate?: Date;
+    settlementDate?: Date;
+    bankPaymentDate?: Date;
   }): Promise<{ account: IAgentAccount; payout: AgentPayout }> {
     try {
+      const agent = await User.findById(agentId).select('companyId').lean();
+      if (!(agent as any)?.companyId) {
+        throw new AppError('Agent payout requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+      }
+      const payoutDates = resolveAccountingDates({
+        originalTransactionDate: payoutData.originalTransactionDate,
+        accountingDate: payoutData.accountingDate,
+        settlementDate: payoutData.settlementDate,
+        bankPaymentDate: payoutData.bankPaymentDate
+      });
+      await assertPeriodAllowsPosting({
+        companyId: String((agent as any).companyId),
+        transactionDate: payoutDates.accountingDate,
+        sourceModule: 'agent_payout',
+        sourceId: agentId
+      });
       const account = await this.getOrCreateAgentAccount(agentId);
       
       if (account.runningBalance < payoutData.amount) {
@@ -458,7 +510,11 @@ export class AgentAccountService {
 
       const payout: AgentPayout = {
         amount: payoutData.amount,
-        date: new Date(),
+        date: payoutDates.accountingDate,
+        originalTransactionDate: payoutDates.originalTransactionDate || undefined,
+        accountingDate: payoutDates.accountingDate,
+        settlementDate: payoutDates.settlementDate || undefined,
+        bankPaymentDate: payoutDates.bankPaymentDate || undefined,
         paymentMethod: payoutData.paymentMethod,
         recipientId: payoutData.recipientId,
         recipientName: payoutData.recipientName,

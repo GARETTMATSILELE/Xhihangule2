@@ -17,6 +17,7 @@ const accountingService_1 = __importDefault(require("../services/accountingServi
 const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
 const financialMigrationGuard_1 = require("../services/financialMigrationGuard");
 const errorHandler_1 = require("../middleware/errorHandler");
+const accountingDatePolicy_1 = require("../services/accountingDatePolicy");
 const parseDate = (value) => {
     if (!value || typeof value !== 'string')
         return undefined;
@@ -260,7 +261,7 @@ const getBankTransactionSuggestions = (req, res) => __awaiter(void 0, void 0, vo
 });
 exports.getBankTransactionSuggestions = getBankTransactionSuggestions;
 const postManualTransaction = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const companyId = getCompanyId(req);
         if (!companyId)
@@ -269,15 +270,21 @@ const postManualTransaction = (req, res) => __awaiter(void 0, void 0, void 0, fu
         if (!reference || !Array.isArray(lines) || lines.length < 2) {
             return res.status(400).json({ message: 'reference and at least two lines are required' });
         }
+        const manualDates = (0, accountingDatePolicy_1.resolveAccountingDates)({
+            originalTransactionDate: (_a = req.body) === null || _a === void 0 ? void 0 : _a.originalTransactionDate,
+            accountingDate: transactionDate,
+            settlementDate: (_b = req.body) === null || _b === void 0 ? void 0 : _b.settlementDate,
+            bankPaymentDate: (_c = req.body) === null || _c === void 0 ? void 0 : _c.bankPaymentDate
+        });
         const result = yield accountingService_1.default.postTransaction({
             companyId,
             reference,
             description,
             sourceModule: 'manual',
             sourceId: `manual:${reference}`,
-            transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
-            createdBy: (_a = req.user) === null || _a === void 0 ? void 0 : _a.userId,
-            periodOverrideReason: ((_b = req.body) === null || _b === void 0 ? void 0 : _b.periodOverrideReason) || ((_c = req.body) === null || _c === void 0 ? void 0 : _c.reason),
+            transactionDate: manualDates.accountingDate,
+            createdBy: (_d = req.user) === null || _d === void 0 ? void 0 : _d.userId,
+            periodOverrideReason: ((_e = req.body) === null || _e === void 0 ? void 0 : _e.periodOverrideReason) || ((_f = req.body) === null || _f === void 0 ? void 0 : _f.reason),
             lines
         });
         return res.status(201).json(Object.assign({ message: 'Transaction posted' }, result));

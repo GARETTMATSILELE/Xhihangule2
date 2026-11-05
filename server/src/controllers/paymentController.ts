@@ -2662,6 +2662,38 @@ export const getPaymentAccountingReconciliation = async (req: Request, res: Resp
       .lean();
     if (!payment || !(await paymentRecordVisible(req, payment as any))) return res.status(404).json({ message: 'Payment not found' });
     const recon = await reconcilePayment(String(payment._id));
+    const { recoveryAssessmentForPayment } = await import('../services/paymentAccountingReconciliation');
+    const fullPayment = await Payment.findById(payment._id);
+    const recoveryAssessment = fullPayment ? await recoveryAssessmentForPayment(fullPayment, recon) : null;
+    const { classifyRecoveryApproval } = await import('../services/journalRecoveryAssessment');
+    const depositExpected = Boolean(recon.expected?.deposit);
+    const depositMissing = (recon.missing || []).includes('deposit');
+    const ownerMismatch = (recon.mismatched || []).includes('ownerIncome');
+    const details = (fullPayment as any)?.commissionDetails || {};
+    const cents = (value: unknown) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+    const storedOwner = cents(details.ownerAmount);
+    const formulaOwner = cents(
+      Number((fullPayment as any)?.amount || 0)
+      - Number(details.commissionNet || details.totalCommission || 0)
+      - Number(details.vatOnCommission || details.vatAmount || 0)
+      - Number(details.levy ?? (fullPayment as any)?.levyAllocated ?? 0)
+    );
+    const historicalVariance = Boolean(fullPayment) && Math.abs(storedOwner - formulaOwner) > 0.02;
+    const approval = classifyRecoveryApproval({
+      periodStatus: recoveryAssessment?.checks?.periodStatus || 'UNMANAGED',
+      referenceCollision: Boolean(recoveryAssessment?.checks?.duplicateReceiptReference || recon.actual?.journalReferenceCollision),
+      historicalVariance,
+      ownerMismatch,
+      depositExpected,
+      depositMissing,
+      journalBalanced: Boolean(recoveryAssessment?.checks?.journalBalanced),
+      reversed: Boolean(recoveryAssessment?.checks?.reversed),
+      journalMissing: (recon.missing || []).includes('journal'),
+      companyMatches: recoveryAssessment?.checks?.companyMatches !== false,
+      projectionsValid: !(recon.mismatched || []).some((item: string) => item !== 'journal')
+    });
+    const exceptionClass = approval.exceptionClass;
+    const recommendedAction = approval.recommendedAction;
     const { loadLegacyIntroductionContextRisk } = await import('../services/legacyIntroductionRisk');
     const { buildPaymentIntegrityDiagnostic, detectCurrencyMismatch } = await import('../services/paymentIntegrityDiagnostic');
     let legacyIntroductionRisk = null;
@@ -2677,6 +2709,10 @@ export const getPaymentAccountingReconciliation = async (req: Request, res: Resp
     }
     return res.json({
       ...recon,
+      recoveryAssessment,
+      exceptionClass,
+      recommendedAction,
+      readyForApproval: approval.readyForApproval,
       diagnostic: buildPaymentIntegrityDiagnostic({
         payment,
         recon,

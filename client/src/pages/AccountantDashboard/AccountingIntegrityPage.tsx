@@ -54,6 +54,16 @@ function moneyText(value: unknown, currency = ''): string {
   return currency ? `${currency} ${formatted}` : formatted;
 }
 
+function exceptionClassForRow(row: AccountingIntegrityRow): string {
+  const text = `${row.component || ''} ${row.missingRecord || ''} ${row.issue || ''}`.toLowerCase();
+  if (row.status === 'ORPHANED') return 'MANUAL REVIEW';
+  if (text.includes('another payment') || text.includes('collision')) return 'REFERENCE COLLISION';
+  if (text.includes('deposit')) return 'DEPOSIT RECONCILIATION';
+  if (text.includes('owner') || text.includes('vat')) return 'HISTORICAL VARIANCE';
+  if (text.includes('journal')) return 'MISSING JOURNAL';
+  return 'MANUAL REVIEW';
+}
+
 function statusColor(status: string): 'success' | 'warning' | 'error' | 'default' {
   if (status === 'VALID' || status === 'complete') return 'success';
   if (status === 'MISSING' || status === 'incomplete') return 'warning';
@@ -185,6 +195,12 @@ const AccountingIntegrityPage: React.FC = () => {
     { field: 'paymentReference', headerName: 'Payment Reference', flex: 1, minWidth: 150 },
     { field: 'amount', headerName: 'Amount', width: 110, valueGetter: (params) => moneyText(params.row.amount, params.row.currency) },
     { field: 'missingRecord', headerName: 'Missing record', flex: 1, minWidth: 160 },
+    {
+      field: 'exceptionClass',
+      headerName: 'Exception',
+      width: 190,
+      valueGetter: (params) => exceptionClassForRow(params.row)
+    },
     { field: 'property', headerName: 'Property', flex: 1, minWidth: 140 },
     { field: 'tenant', headerName: 'Tenant', width: 140 },
     { field: 'currency', headerName: 'Currency', width: 90 },
@@ -375,7 +391,14 @@ const AccountingIntegrityPage: React.FC = () => {
               )}
               {recon && (
                 <>
+                  <Alert severity={recon.exceptionClass === 'READY FOR RECOVERY' ? 'success' : 'warning'} sx={{ mb: 2 }}>
+                    {recon.exceptionClass || exceptionClassForRow(selected)}. {recon.recommendedAction || 'Recovery stays on the existing single-payment repair pipeline. Nothing is posted from this screen until an accountant confirms it.'}
+                  </Alert>
                   <Typography variant="body2">Payment amount: {moneyText(recon.expected?.amounts?.journal, selected.currency)}</Typography>
+                  <Typography variant="body2">Payment date: {selected.date ? new Date(selected.date).toLocaleDateString() : '—'}</Typography>
+                  <Typography variant="body2">Company: {selected.companyId || '—'}</Typography>
+                  <Typography variant="body2">Period: {recon.recoveryAssessment?.checks?.periodStatus || 'Not established'}</Typography>
+                  <Typography variant="body2">Journal balance: {recon.recoveryAssessment?.checks?.journalBalanced ? 'Debits equal credits' : 'Not established'}</Typography>
                   <Typography variant="body2">Deposit: {moneyText(recon.expected?.amounts?.deposit, selected.currency)}</Typography>
                   <Typography variant="body2" sx={{ mb: 2 }}>
                     Accounting complete: {recon.accountingComplete ? 'YES' : 'NO'}

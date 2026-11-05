@@ -35,6 +35,10 @@ export interface AgentPayout {
   notes?: string;
   processedBy?: Types.ObjectId;
   processedAt?: Date;
+  originalTransactionDate?: Date;
+  accountingDate?: Date;
+  settlementDate?: Date;
+  bankPaymentDate?: Date;
 }
 
 export interface IAgentAccount extends Document {
@@ -140,7 +144,11 @@ const agentPayoutSchema = new Schema<AgentPayout>({
   },
   processedAt: {
     type: Date
-  }
+  },
+  originalTransactionDate: { type: Date, required: false },
+  accountingDate: { type: Date, required: false },
+  settlementDate: { type: Date, required: false },
+  bankPaymentDate: { type: Date, required: false }
 }, { _id: true });
 
 const agentAccountSchema = new Schema<IAgentAccount>({

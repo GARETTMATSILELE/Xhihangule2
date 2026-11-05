@@ -24,6 +24,10 @@ export interface ITrustTransaction extends Document {
   runningBalance: number;
   reference?: string;
   sourceEvent?: string;
+  originalTransactionDate?: Date;
+  accountingDate?: Date;
+  settlementDate?: Date;
+  bankPaymentDate?: Date;
   createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -47,6 +51,10 @@ const TrustTransactionSchema: Schema<ITrustTransaction> = new Schema(
     runningBalance: { type: Number, required: true },
     reference: { type: String, required: false, trim: true },
     sourceEvent: { type: String, required: false, trim: true },
+    originalTransactionDate: { type: Date, required: false, immutable: true },
+    accountingDate: { type: Date, required: false, immutable: true },
+    settlementDate: { type: Date, required: false, immutable: true },
+    bankPaymentDate: { type: Date, required: false, immutable: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: false, immutable: true }
   },
   { timestamps: true }

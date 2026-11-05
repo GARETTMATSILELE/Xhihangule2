@@ -21,6 +21,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
+const AccountingPeriod_1 = require("../models/AccountingPeriod");
 const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const Payment_1 = require("../models/Payment");
@@ -41,6 +42,7 @@ const commissionService_1 = require("../services/commissionService");
 const propertyCommissionCalculator_1 = require("../services/propertyCommissionCalculator");
 const vatPolicyService_1 = require("../services/vatPolicyService");
 const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
 const paymentAccountingOrchestrator_1 = require("../services/paymentAccountingOrchestrator");
 const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
@@ -204,6 +206,28 @@ function main() {
             workspaceType: 'agency',
             taxProfile: { vatRegistered: true, vatNumber: 'ZW-REM', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
         });
+        for (const date of [PAYMENT_DATE, new Date()]) {
+            const bounds = (0, accountingPeriodService_1.utcMonthBounds)(date);
+            const existing = yield AccountingPeriod_1.AccountingPeriod.findOne({
+                companyId: company._id,
+                periodStart: bounds.periodStart,
+                periodEnd: bounds.periodEnd
+            }).select('_id').lean();
+            if (existing)
+                continue;
+            yield AccountingPeriod_1.AccountingPeriod.create({
+                companyId: company._id,
+                financialYear: bounds.periodStart.getUTCFullYear(),
+                period: bounds.periodStart.getUTCMonth() + 1,
+                month: bounds.periodStart.getUTCMonth() + 1,
+                periodStart: bounds.periodStart,
+                periodEnd: bounds.periodEnd,
+                startDate: bounds.periodStart,
+                endDate: bounds.periodEnd,
+                status: 'OPEN',
+                createdBy: user._id
+            });
+        }
         const property = yield Property_1.Property.create({
             companyId: company._id,
             ownerId: user._id,

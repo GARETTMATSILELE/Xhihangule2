@@ -1386,6 +1386,13 @@ class PropertyAccountService {
                     logger_1.logger.info(`Skipping income recording for payment ${paymentId} - ${policy.reason}`);
                     return;
                 }
+                const { assertPeriodAllowsPosting } = yield Promise.resolve().then(() => __importStar(require('./accountingPeriodService')));
+                yield assertPeriodAllowsPosting({
+                    companyId: String(payment.companyId),
+                    transactionDate: new Date(payment.paymentDate || Date.now()),
+                    sourceModule: 'payment',
+                    sourceId: paymentId
+                });
                 try {
                     const completeness = yield (0, paymentAccountingCompleteness_1.checkPaymentAccountingCompleteness)(payment, this.ownerIncomeCompletenessDeps());
                     if ((0, paymentAccountingCompleteness_1.shouldSkipRecordIncomePosting)(completeness)) {
@@ -1987,11 +1994,34 @@ class PropertyAccountService {
                 if (account.runningBalance < payoutData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for this payout', 400);
                 }
+                const payoutCompanyId = yield this.resolveCompanyIdForEntity(propertyId);
+                if (!payoutCompanyId) {
+                    throw new errorHandler_1.AppError('Owner payout requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+                }
+                const { assertPeriodAllowsPosting } = yield Promise.resolve().then(() => __importStar(require('./accountingPeriodService')));
+                const { resolveAccountingDates } = yield Promise.resolve().then(() => __importStar(require('./accountingDatePolicy')));
+                const payoutDates = resolveAccountingDates({
+                    originalTransactionDate: payoutData.originalTransactionDate,
+                    accountingDate: payoutData.accountingDate,
+                    settlementDate: payoutData.settlementDate,
+                    bankPaymentDate: payoutData.bankPaymentDate
+                });
+                yield assertPeriodAllowsPosting({
+                    companyId: payoutCompanyId,
+                    transactionDate: payoutDates.accountingDate,
+                    sourceModule: 'owner_payout',
+                    sourceId: propertyId,
+                    actorId: payoutData.processedBy
+                });
                 const referenceNumber = `PAYOUT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
                 const payoutStatus = payoutData.autoComplete ? 'completed' : 'pending';
                 const payout = {
                     amount: payoutData.amount,
-                    date: new Date(),
+                    date: payoutDates.accountingDate,
+                    originalTransactionDate: payoutDates.originalTransactionDate || undefined,
+                    accountingDate: payoutDates.accountingDate,
+                    settlementDate: payoutDates.settlementDate || undefined,
+                    bankPaymentDate: payoutDates.bankPaymentDate || undefined,
                     paymentMethod: payoutData.paymentMethod,
                     referenceNumber,
                     idempotencyKey: idKey,

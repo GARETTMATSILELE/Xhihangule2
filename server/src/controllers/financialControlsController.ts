@@ -9,7 +9,8 @@ import {
 import { buildTrialBalance } from '../services/trialBalanceService';
 import {
   closeAccountingPeriod,
-  createAccountingPeriod,
+  activateAccountingPeriod,
+  previewAccountingPeriod,
   listAccountingPeriods,
   reopenAccountingPeriod
 } from '../services/accountingPeriodService';
@@ -100,13 +101,26 @@ export const getAccountingPeriods = asyncHandler(async (req: Request, res: Respo
 });
 
 export const postAccountingPeriod = asyncHandler(async (req: Request, res: Response) => {
-  const data = await createAccountingPeriod({
+  const financialYear = Number(req.body?.financialYear);
+  const month = Number(req.body?.month ?? req.body?.period);
+  const preview = previewAccountingPeriod(financialYear, month);
+  const result = await activateAccountingPeriod({
     companyId: companyIdOf(req),
-    periodStart: new Date(req.body?.periodStart),
-    periodEnd: new Date(req.body?.periodEnd),
-    createdBy: actorIdOf(req)
+    financialYear,
+    month,
+    createdBy: actorIdOf(req),
+    confirmed: req.body?.confirmed === true
   });
-  return res.status(201).json({ status: 'success', data });
+  return res.status(result.created ? 201 : 200).json({
+    status: 'success',
+    created: result.created,
+    alreadyExisted: result.alreadyExisted,
+    message: result.alreadyExisted
+      ? 'This accounting period already exists for the company. It was not opened again.'
+      : 'Accounting period opened.',
+    preview,
+    data: result.period
+  });
 });
 
 export const closeAccountingPeriodHandler = asyncHandler(async (req: Request, res: Response) => {

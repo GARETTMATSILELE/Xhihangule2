@@ -32,6 +32,7 @@ const propertyCommissionCalculator_1 = require("../services/propertyCommissionCa
 const vatPolicyService_1 = require("../services/vatPolicyService");
 const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const paymentAccountingOrchestrator_1 = require("../services/paymentAccountingOrchestrator");
 const accountingIntegrationService_1 = __importDefault(require("../services/accountingIntegrationService"));
 const journalDuplicateKey_1 = require("../services/journalDuplicateKey");
@@ -127,6 +128,8 @@ function main() {
             ownerId: user._id,
             taxProfile: { vatRegistered: true, vatNumber: 'ZW-JRN', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
         });
+        yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(company._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+        yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(company._id), date: new Date(), createdBy: String(user._id) });
         const property = yield Property_1.Property.create({
             companyId: company._id,
             ownerId: user._id,

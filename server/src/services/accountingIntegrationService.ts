@@ -16,6 +16,7 @@ import { filingPeriodFromDate as taxFilingPeriod } from './tax/vatCalculation';
 import { GL } from './tax/chartAccounts';
 import { upsertPaymentTaxObligation, reversePaymentTaxObligations } from './taxObligationService';
 import { journalPaymentType } from './transactionDomain';
+import { assertPeriodAllowsPosting } from './accountingPeriodService';
 import { JournalEntry } from '../models/JournalEntry';
 import { JournalLine } from '../models/JournalLine';
 import { ChartOfAccount } from '../models/ChartOfAccount';
@@ -232,6 +233,13 @@ class AccountingIntegrationService {
     if (!shouldPostCompanyCommission(payment)) return;
     const agencyShare = toMoney((payment.commissionDetails as any)?.agencyShare || 0);
     if (!(agencyShare > 0) || !payment.companyId) return;
+    await assertPeriodAllowsPosting({
+      companyId: String(payment.companyId),
+      transactionDate: new Date((payment as any).paymentDate || Date.now()),
+      sourceModule: 'payment',
+      sourceId: String(payment._id),
+      actorId: (payment as any).processedBy ? String((payment as any).processedBy) : undefined
+    });
     const companyId = payment.companyId;
     const desiredSource = journalPaymentType(payment) === 'sale' ? 'sales_commission' : 'rental_commission';
     const txDoc = {
@@ -454,6 +462,14 @@ class AccountingIntegrationService {
         )
       : [];
     if (!originalLines.length) return 'skipped';
+    await assertPeriodAllowsPosting({
+      companyId,
+      transactionDate: new Date(),
+      sourceModule: 'payment',
+      sourceId: `${paymentId}:commission-reversal`,
+      actorId: opts?.createdBy,
+      overrideReason: opts?.reason
+    });
     const already = Array.isArray((account as any)?.transactions)
       && (account as any).transactions.some((t: any) => String(t?.reversesPaymentId || '') === paymentId);
     if (already) return 'reversed';
@@ -565,6 +581,7 @@ class AccountingIntegrationService {
             sourceId: `${paymentId}:reversal`,
             transactionDate: new Date(),
             createdBy: opts?.createdBy,
+            periodOverrideReason: opts?.reason,
             lines
           }));
         } else if (!original) {
@@ -589,6 +606,7 @@ class AccountingIntegrationService {
             sourceId: `${paymentId}:commission:reversal`,
             transactionDate: new Date(),
             createdBy: opts?.createdBy,
+            periodOverrideReason: opts?.reason,
             lines: [
               { accountCode: '5002', credit: agentShare },
               {

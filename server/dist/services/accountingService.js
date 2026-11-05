@@ -276,6 +276,9 @@ class AccountingService {
                 ], session ? { session } : undefined);
                 return { journalEntryId: createdEntry._id.toString() };
             });
+            // The journal and its lines share this connection and post in one transaction when the server allows it.
+            // Owner, agent, and company projections live on the accounting connection, so they cannot join this transaction.
+            // Those writers stay idempotent and are reconciled after the journal attempt.
             let session = null;
             try {
                 session = yield mongoose_1.default.startSession();

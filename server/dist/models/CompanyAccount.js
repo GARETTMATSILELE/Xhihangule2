@@ -18,6 +18,10 @@ const CompanyTransactionSchema = new mongoose_1.Schema({
     processedBy: { type: mongoose_1.Schema.Types.ObjectId, required: false },
     notes: { type: String },
     idempotencyKey: { type: String, required: false },
+    originalTransactionDate: { type: Date, required: false },
+    accountingDate: { type: Date, required: false },
+    settlementDate: { type: Date, required: false },
+    bankPaymentDate: { type: Date, required: false },
     isArchived: { type: Boolean, default: false },
 }, { timestamps: true });
 const CompanyAccountSchema = new mongoose_1.Schema({

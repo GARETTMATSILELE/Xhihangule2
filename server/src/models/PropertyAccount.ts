@@ -113,6 +113,10 @@ export interface OwnerPayout {
     accountName?: string;
   };
   notes?: string;
+  originalTransactionDate?: Date;
+  accountingDate?: Date;
+  settlementDate?: Date;
+  bankPaymentDate?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -392,6 +396,10 @@ const OwnerPayoutSchema = new Schema<OwnerPayout>({
   notes: { 
     type: String 
   },
+  originalTransactionDate: { type: Date, required: false },
+  accountingDate: { type: Date, required: false },
+  settlementDate: { type: Date, required: false },
+  bankPaymentDate: { type: Date, required: false },
   createdAt: { 
     type: Date, 
     default: Date.now 

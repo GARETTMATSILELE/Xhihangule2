@@ -27,6 +27,10 @@ export interface CompanyTransaction {
   processedBy?: Types.ObjectId;
   notes?: string;
   idempotencyKey?: string;
+  originalTransactionDate?: Date;
+  accountingDate?: Date;
+  settlementDate?: Date;
+  bankPaymentDate?: Date;
   // Soft archive flag for duplicate/correction entries
   isArchived?: boolean;
   createdAt?: Date;
@@ -58,6 +62,10 @@ const CompanyTransactionSchema = new Schema<CompanyTransaction>({
   processedBy: { type: Schema.Types.ObjectId, required: false },
   notes: { type: String },
   idempotencyKey: { type: String, required: false },
+  originalTransactionDate: { type: Date, required: false },
+  accountingDate: { type: Date, required: false },
+  settlementDate: { type: Date, required: false },
+  bankPaymentDate: { type: Date, required: false },
   isArchived: { type: Boolean, default: false },
 }, { timestamps: true });
 

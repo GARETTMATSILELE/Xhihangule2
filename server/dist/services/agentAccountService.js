@@ -25,6 +25,8 @@ const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const commissionProjection_1 = require("./commissionProjection");
 const propertyAccountTotals_1 = require("./propertyAccountTotals");
 const rentalPeriod_1 = require("../reporting/rentalPeriod");
+const accountingPeriodService_1 = require("./accountingPeriodService");
+const accountingDatePolicy_1 = require("./accountingDatePolicy");
 const PAYMENT_OBJECT_ID = /^[a-f0-9]{24}$/i;
 function paymentIdFromTransaction(tx) {
     const direct = tx.paymentId ? String(tx.paymentId) : '';
@@ -142,10 +144,20 @@ class AgentAccountService {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const payment = yield Payment_1.Payment.findById(paymentId)
-                    .select('_id paymentDate referenceNumber paymentType rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
+                    .select('_id companyId paymentDate referenceNumber paymentType rentalPeriodMonth rentalPeriodYear advanceMonthsPaid advancePeriodStart advancePeriodEnd')
                     .lean();
                 if (!payment)
                     return 'absent';
+                if (!payment.companyId) {
+                    throw new errorHandler_1.AppError('Agent commission reversal requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+                }
+                yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                    companyId: String(payment.companyId),
+                    transactionDate: new Date(),
+                    sourceModule: 'agent_commission',
+                    sourceId: `${paymentId}:reversal`,
+                    overrideReason: reason
+                });
                 let handled = false;
                 const accounts = yield AgentAccount_1.AgentAccount.find({ 'transactions.paymentId': String(paymentId) });
                 for (const account of accounts) {
@@ -306,6 +318,27 @@ class AgentAccountService {
     addCommission(agentId, commissionData) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                let companyId;
+                let transactionDate = commissionData.date;
+                if (commissionData.paymentId && mongoose_1.default.Types.ObjectId.isValid(String(commissionData.paymentId))) {
+                    const source = yield Payment_1.Payment.findById(commissionData.paymentId).select('companyId paymentDate').lean();
+                    companyId = (source === null || source === void 0 ? void 0 : source.companyId) ? String(source.companyId) : undefined;
+                    if (source === null || source === void 0 ? void 0 : source.paymentDate)
+                        transactionDate = new Date(source.paymentDate);
+                }
+                if (!companyId) {
+                    const agent = yield User_1.User.findById(agentId).select('companyId').lean();
+                    companyId = (agent === null || agent === void 0 ? void 0 : agent.companyId) ? String(agent.companyId) : undefined;
+                }
+                if (!companyId) {
+                    throw new errorHandler_1.AppError('Agent commission requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+                }
+                yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                    companyId,
+                    transactionDate,
+                    sourceModule: 'agent_commission',
+                    sourceId: commissionData.paymentId
+                });
                 const account = yield this.getOrCreateAgentAccount(agentId);
                 if (commissionData.paymentId) {
                     const role = (0, commissionProjection_1.inferCommissionRoleFromReference)(commissionData.reference || '');
@@ -402,6 +435,22 @@ class AgentAccountService {
     createAgentPayout(agentId, payoutData) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
+                const agent = yield User_1.User.findById(agentId).select('companyId').lean();
+                if (!(agent === null || agent === void 0 ? void 0 : agent.companyId)) {
+                    throw new errorHandler_1.AppError('Agent payout requires a company accounting period', 409, 'PERIOD_NOT_ESTABLISHED');
+                }
+                const payoutDates = (0, accountingDatePolicy_1.resolveAccountingDates)({
+                    originalTransactionDate: payoutData.originalTransactionDate,
+                    accountingDate: payoutData.accountingDate,
+                    settlementDate: payoutData.settlementDate,
+                    bankPaymentDate: payoutData.bankPaymentDate
+                });
+                yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                    companyId: String(agent.companyId),
+                    transactionDate: payoutDates.accountingDate,
+                    sourceModule: 'agent_payout',
+                    sourceId: agentId
+                });
                 const account = yield this.getOrCreateAgentAccount(agentId);
                 if (account.runningBalance < payoutData.amount) {
                     throw new errorHandler_1.AppError('Insufficient balance for payout', 400);
@@ -410,7 +459,11 @@ class AgentAccountService {
                 const referenceNumber = `AGP-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
                 const payout = {
                     amount: payoutData.amount,
-                    date: new Date(),
+                    date: payoutDates.accountingDate,
+                    originalTransactionDate: payoutDates.originalTransactionDate || undefined,
+                    accountingDate: payoutDates.accountingDate,
+                    settlementDate: payoutDates.settlementDate || undefined,
+                    bankPaymentDate: payoutDates.bankPaymentDate || undefined,
                     paymentMethod: payoutData.paymentMethod,
                     recipientId: payoutData.recipientId,
                     recipientName: payoutData.recipientName,

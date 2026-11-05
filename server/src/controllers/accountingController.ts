@@ -8,6 +8,7 @@ import {
   finishMigrationAudit
 } from '../services/financialMigrationGuard';
 import { AppError } from '../middleware/errorHandler';
+import { resolveAccountingDates } from '../services/accountingDatePolicy';
 
 const parseDate = (value: unknown): Date | undefined => {
   if (!value || typeof value !== 'string') return undefined;
@@ -241,13 +242,19 @@ export const postManualTransaction = async (req: Request, res: Response) => {
     if (!reference || !Array.isArray(lines) || lines.length < 2) {
       return res.status(400).json({ message: 'reference and at least two lines are required' });
     }
+    const manualDates = resolveAccountingDates({
+      originalTransactionDate: req.body?.originalTransactionDate,
+      accountingDate: transactionDate,
+      settlementDate: req.body?.settlementDate,
+      bankPaymentDate: req.body?.bankPaymentDate
+    });
     const result = await accountingService.postTransaction({
       companyId,
       reference,
       description,
       sourceModule: 'manual',
       sourceId: `manual:${reference}`,
-      transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
+      transactionDate: manualDates.accountingDate,
       createdBy: req.user?.userId,
       periodOverrideReason: req.body?.periodOverrideReason || req.body?.reason,
       lines

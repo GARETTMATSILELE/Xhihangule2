@@ -52,6 +52,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = require("../models/User");
 const Company_1 = require("../models/Company");
+const AccountingPeriod_1 = require("../models/AccountingPeriod");
 const Property_1 = require("../models/Property");
 const Tenant_1 = require("../models/Tenant");
 const Payment_1 = require("../models/Payment");
@@ -73,6 +74,7 @@ const paymentAccountingIntegrityController_1 = require("../controllers/paymentAc
 const paymentAccountingIntegrity_1 = require("../services/paymentAccountingIntegrity");
 const financialOperationVisibility_1 = require("../services/financialOperationVisibility");
 const database_1 = require("../config/database");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const DB = process.env.INTEGRITY_GAP_DB || 'mongodb://127.0.0.1:27017/mantis_integrity_gap_test';
 const ACCOUNTING_DB = process.env.INTEGRITY_GAP_ACCOUNTING_DB || 'mongodb://127.0.0.1:27017/mantis_integrity_gap_accounting';
 const failures = [];
@@ -116,6 +118,21 @@ function main() {
             name: 'Other Integrity Co', address: '2 Integrity Street', phone: '0770000402', email: 'other-integrity@example.test',
             registrationNumber: 'GAP-2', tinNumber: 'GAP-TIN-2', country: 'Zimbabwe', ownerId: user._id
         });
+        const october = (0, accountingPeriodService_1.utcMonthBounds)(new Date('2026-10-15T00:00:00.000Z'));
+        for (const ownerCompany of [company, otherCompany]) {
+            yield AccountingPeriod_1.AccountingPeriod.create({
+                companyId: ownerCompany._id,
+                financialYear: 2026,
+                period: 10,
+                month: 10,
+                periodStart: october.periodStart,
+                periodEnd: october.periodEnd,
+                startDate: october.periodStart,
+                endDate: october.periodEnd,
+                status: 'OPEN',
+                createdBy: user._id
+            });
+        }
         function makeProperty(ownerCompany, name) {
             return __awaiter(this, void 0, void 0, function* () {
                 return Property_1.Property.create({

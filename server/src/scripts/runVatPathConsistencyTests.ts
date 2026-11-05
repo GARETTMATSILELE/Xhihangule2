@@ -12,6 +12,7 @@ import { TaxObligation } from '../models/TaxObligation';
 import { createAgentPayment } from '../controllers/agentController';
 import { createPaymentAccountant } from '../controllers/paymentController';
 import { ensurePaymentAccountingPosted, missingOriginalVatObligation } from '../services/paymentAccountingReconciliation';
+import { openExplicitPeriodForDate } from '../services/accountingPeriodService';
 import { detectVatOnCommissionExceptions } from '../services/taxIntegrityService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
 import { accountingConnection } from '../config/database';
@@ -116,6 +117,8 @@ async function main() {
     accountant.companyId = row._id;
     await agent.save();
     await accountant.save();
+    await openExplicitPeriodForDate({ companyId: String(row._id), date: PAYMENT_DATE, createdBy: String(agent._id) });
+    await openExplicitPeriodForDate({ companyId: String(row._id), date: PRIOR_DATE, createdBy: String(agent._id) });
     return row;
   }
 

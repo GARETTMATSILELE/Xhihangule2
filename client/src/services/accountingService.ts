@@ -420,9 +420,9 @@ const accountingService = {
     const res = await api.get('/accounting/periods');
     return res.data?.data || [];
   },
-  async createAccountingPeriod(payload: { periodStart: string; periodEnd: string }): Promise<any> {
+  async createAccountingPeriod(payload: { financialYear: number; month: number; confirmed: true }): Promise<any> {
     const res = await api.post('/accounting/periods', payload);
-    return res.data?.data;
+    return res.data;
   },
   async closeAccountingPeriod(id: string, payload: { reason: string; status?: 'SOFT_CLOSED' | 'CLOSED' }): Promise<any> {
     const res = await api.post(`/accounting/periods/${id}/close`, payload);

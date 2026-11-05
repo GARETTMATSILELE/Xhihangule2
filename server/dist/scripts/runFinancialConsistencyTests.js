@@ -34,6 +34,7 @@ const propertyCommissionCalculator_1 = require("../services/propertyCommissionCa
 const vatPolicyService_1 = require("../services/vatPolicyService");
 const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const rentalDeposit_1 = require("../models/rentalDeposit");
 const paymentAccountingOrchestrator_1 = require("../services/paymentAccountingOrchestrator");
 const vatReturnService_1 = require("../services/vatReturnService");
@@ -102,6 +103,10 @@ function main() {
             ownerId: user._id,
             taxProfile: { vatRegistered: false }
         });
+        for (const ownerCompany of [company, otherCompany]) {
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: new Date(), createdBy: String(user._id) });
+        }
         const exclusive = yield Property_1.Property.create({
             companyId: company._id, ownerId: user._id, name: 'Exclusive House', address: '1 Exclusive Road',
             rentalType: 'management', rent: 1800, commission: 15, vatOnCommission: true, vatCommissionTreatment: 'exclusive'

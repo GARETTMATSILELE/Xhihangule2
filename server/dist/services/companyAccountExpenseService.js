@@ -22,6 +22,8 @@ const accountingIntegrationService_1 = __importDefault(require("./accountingInte
 const journalDuplicateKey_1 = require("./journalDuplicateKey");
 const operationalSignal_1 = require("./operationalSignal");
 const money_1 = require("../utils/money");
+const accountingPeriodService_1 = require("./accountingPeriodService");
+const accountingDatePolicy_1 = require("./accountingDatePolicy");
 class CompanyExpenseIdempotencyError extends Error {
     constructor() {
         super('This idempotency key was already used for a different company expense');
@@ -203,6 +205,10 @@ function appendExpense(input) {
             type: input.type,
             amount: input.amount,
             date: input.date,
+            originalTransactionDate: input.originalTransactionDate || undefined,
+            accountingDate: input.accountingDate || input.date,
+            settlementDate: input.settlementDate || undefined,
+            bankPaymentDate: input.bankPaymentDate || undefined,
             description: input.description,
             referenceNumber: input.reference,
             paymentMethod: input.paymentMethod,
@@ -272,7 +278,13 @@ function recordCompanyAccountExpense(input) {
             throw error;
         }
         const type = input.type === 'income' ? 'income' : 'expense';
-        const txDate = input.date ? new Date(input.date) : new Date();
+        const expenseDates = (0, accountingDatePolicy_1.resolveAccountingDates)({
+            originalTransactionDate: input.originalTransactionDate,
+            accountingDate: input.accountingDate || input.date,
+            settlementDate: input.settlementDate,
+            bankPaymentDate: input.bankPaymentDate
+        });
+        const txDate = expenseDates.accountingDate;
         if (Number.isNaN(txDate.getTime())) {
             const error = new Error('Valid date is required');
             error.statusCode = 400;
@@ -288,6 +300,10 @@ function recordCompanyAccountExpense(input) {
                 type,
                 amount,
                 date: txDate,
+                originalTransactionDate: expenseDates.originalTransactionDate || undefined,
+                accountingDate: expenseDates.accountingDate,
+                settlementDate: expenseDates.settlementDate || undefined,
+                bankPaymentDate: expenseDates.bankPaymentDate || undefined,
                 description: input.description || input.category || undefined,
                 referenceNumber: reference,
                 paymentMethod: input.paymentMethod || undefined,
@@ -302,6 +318,13 @@ function recordCompanyAccountExpense(input) {
             const totals = type === 'income'
                 ? { totalIncome: amount, runningBalance: amount }
                 : { totalExpenses: amount, runningBalance: -amount };
+            yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                companyId,
+                transactionDate: txDate,
+                sourceModule: 'company_expense',
+                sourceId: reference,
+                actorId: input.processedBy
+            });
             const updated = yield CompanyAccount_1.CompanyAccount.findOneAndUpdate({ _id: account._id }, { $push: { transactions: transaction }, $inc: totals, $set: { lastUpdated: now } }, { new: true });
             if (type === 'expense') {
                 yield syncStoredExpense(companyId, String(txId), Object.assign(Object.assign({}, transaction), { type: 'expense' }), input.processedBy);
@@ -408,12 +431,23 @@ function recordCompanyAccountExpense(input) {
             }
         }
         if (!claim.transactionId) {
+            yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                companyId,
+                transactionDate: txDate,
+                sourceModule: 'company_expense',
+                sourceId: rawKey,
+                actorId: input.processedBy
+            });
             const appended = yield appendExpense({
                 companyId,
                 idempotencyKey: rawKey,
                 type,
                 amount: claim.amount,
                 date: txDate,
+                originalTransactionDate: expenseDates.originalTransactionDate,
+                accountingDate: expenseDates.accountingDate,
+                settlementDate: expenseDates.settlementDate,
+                bankPaymentDate: expenseDates.bankPaymentDate,
                 description: claim.description,
                 reference: claim.reference || reference,
                 paymentMethod: input.paymentMethod,

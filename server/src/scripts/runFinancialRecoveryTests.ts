@@ -21,6 +21,7 @@ import { toPaymentCommissionSnapshot } from '../services/propertyCommissionCalcu
 import { commissionVatFlagsFromPolicy, resolveCommissionVatPolicy, stampVatDecision } from '../services/vatPolicyService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
 import { ensureDepositLedgerFromPayment, ensurePaymentAccountingPosted } from '../services/paymentAccountingReconciliation';
+import { openExplicitPeriodForDate } from '../services/accountingPeriodService';
 import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import ledgerEventService from '../services/ledgerEventService';
 import { accountingConnection } from '../config/database';
@@ -64,6 +65,10 @@ async function main() {
     name: 'Other Recovery Co', address: '2 Recovery Street', phone: '0770000302', email: 'other-recovery@example.test',
     registrationNumber: 'REC-2', tinNumber: 'REC-TIN-2', country: 'Zimbabwe', ownerId: user._id
   });
+  for (const ownerCompany of [company, other]) {
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: new Date(), createdBy: String(user._id) });
+  }
   const property = await Property.create({
     companyId: company._id, ownerId: user._id, name: 'Recovery House', address: '1 Recovery Road',
     rentalType: 'management', rent: 1800, commission: 15, vatOnCommission: true, vatCommissionTreatment: 'exclusive'

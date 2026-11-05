@@ -38,8 +38,14 @@ const mongoose_1 = __importStar(require("mongoose"));
 const collections_1 = require("../config/collections");
 const AccountingPeriodSchema = new mongoose_1.Schema({
     companyId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
+    financialYear: { type: Number, required: true, min: 1900, max: 2100 },
+    period: { type: Number, required: true, min: 1, max: 12 },
+    month: { type: Number, required: true, min: 1, max: 12 },
     periodStart: { type: Date, required: true },
     periodEnd: { type: Date, required: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+    createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
     status: {
         type: String,
         enum: ['OPEN', 'SOFT_CLOSED', 'CLOSED'],
@@ -52,8 +58,10 @@ const AccountingPeriodSchema = new mongoose_1.Schema({
     closeReason: { type: String, required: false, trim: true },
     reopenedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false },
     reopenedAt: { type: Date, required: false },
-    reopenReason: { type: String, required: false, trim: true }
+    reopenReason: { type: String, required: false, trim: true },
+    reopeningReason: { type: String, required: false, trim: true }
 }, { timestamps: true });
 AccountingPeriodSchema.index({ companyId: 1, periodStart: 1, periodEnd: 1 }, { unique: true });
+AccountingPeriodSchema.index({ companyId: 1, financialYear: 1, month: 1 }, { unique: true, name: 'company_financial_year_month_unique' });
 AccountingPeriodSchema.index({ companyId: 1, status: 1, periodStart: -1 });
 exports.AccountingPeriod = mongoose_1.default.model('AccountingPeriod', AccountingPeriodSchema, collections_1.COLLECTIONS.ACCOUNTING_PERIODS);

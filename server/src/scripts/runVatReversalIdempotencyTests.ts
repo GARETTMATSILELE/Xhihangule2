@@ -16,6 +16,7 @@ import { toPaymentCommissionSnapshot } from '../services/propertyCommissionCalcu
 import { commissionVatFlagsFromPolicy, resolveCommissionVatPolicy } from '../services/vatPolicyService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
 import { ensurePaymentAccountingPosted } from '../services/paymentAccountingReconciliation';
+import { openExplicitPeriodForDate } from '../services/accountingPeriodService';
 import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import { reversePaymentTaxObligations, upsertPaymentTaxObligation } from '../services/taxObligationService';
 import { accountingConnection } from '../config/database';
@@ -70,6 +71,8 @@ async function main() {
     ownerId: user._id,
     taxProfile: { vatRegistered: true, vatNumber: 'ZW-REV', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
   });
+  await openExplicitPeriodForDate({ companyId: String(company._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+  await openExplicitPeriodForDate({ companyId: String(company._id), date: new Date(), createdBy: String(user._id) });
   const property = await Property.create({
     companyId: company._id,
     ownerId: user._id,

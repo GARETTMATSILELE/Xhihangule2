@@ -31,6 +31,8 @@
     "test:phase5b": "npm run build && node dist/scripts/runPhase5bAccountingTests.js",
     "test:phase2c": "npm run build && node dist/scripts/runPhase2cAccountingIntegrityTests.js",
     "test:journal-safeguards": "ts-node --transpile-only src/scripts/runJournalSafeguardTests.ts",
+    "test:accounting-periods": "ts-node --transpile-only src/scripts/runAccountingPeriodGovernanceTests.ts",
+    "test:accounting-period-concurrency": "ts-node --transpile-only src/scripts/runAccountingPeriodConcurrencyTests.ts",
     "test:phase2d": "npm run build && node dist/scripts/runPhase2dWritePathLockdownTests.js",
     "test:phase21": "npm run build && node dist/scripts/runPhase21AgentCommissionAndStartupTests.js",
     "test:vat-commission": "npm run build && node dist/scripts/runVatOnCommissionTests.js",

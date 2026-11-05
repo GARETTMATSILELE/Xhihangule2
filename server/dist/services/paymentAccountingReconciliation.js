@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -20,6 +53,7 @@ exports.upsertIncompleteAccountingException = upsertIncompleteAccountingExceptio
 exports.resolveIncompleteAccountingException = resolveIncompleteAccountingException;
 exports.applyReconciliationOutcome = applyReconciliationOutcome;
 exports.ensureDepositLedgerFromPayment = ensureDepositLedgerFromPayment;
+exports.recoveryAssessmentForPayment = recoveryAssessmentForPayment;
 exports.repairPaymentAccounting = repairPaymentAccounting;
 exports.missingOriginalVatObligation = missingOriginalVatObligation;
 exports.ensurePaymentAccountingPosted = ensurePaymentAccountingPosted;
@@ -52,6 +86,8 @@ const paymentAccountingCompleteness_1 = require("./paymentAccountingCompleteness
 const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const vatPolicyService_1 = require("./vatPolicyService");
 const money_1 = require("../utils/money");
+const accountingPeriodService_1 = require("./accountingPeriodService");
+const journalRecoveryAssessment_1 = require("./journalRecoveryAssessment");
 function asObjectId(paymentId) {
     return mongoose_1.default.Types.ObjectId.isValid(paymentId) ? new mongoose_1.default.Types.ObjectId(paymentId) : null;
 }
@@ -85,7 +121,21 @@ function loadAccountingActualSnapshot(payment) {
         const oid = asObjectId(paymentId);
         if (!oid)
             return empty;
-        const [propertyAccount, agentAccounts, companyAccount, journalHit, vatHit, deposits] = yield Promise.all([
+        const companyId = payment === null || payment === void 0 ? void 0 : payment.companyId;
+        const companyObjectId = companyId && mongoose_1.default.Types.ObjectId.isValid(String(companyId))
+            ? new mongoose_1.default.Types.ObjectId(String(companyId))
+            : null;
+        const receiptReference = (0, journalRecoveryAssessment_1.receiptJournalReference)(payment);
+        const receiptModule = (0, journalRecoveryAssessment_1.receiptJournalSourceModule)(payment);
+        const journalFilter = [];
+        if (companyObjectId && receiptModule) {
+            journalFilter.push({ companyId: companyObjectId, sourceModule: receiptModule, sourceId: paymentId, status: 'posted' });
+        }
+        if (companyObjectId) {
+            journalFilter.push({ companyId: companyObjectId, reference: receiptReference, status: 'posted' });
+        }
+        journalFilter.push({ reference: receiptReference, status: 'posted' });
+        const [propertyAccount, agentAccounts, companyAccount, journalCandidates, vatHit, deposits] = yield Promise.all([
             PropertyAccount_1.default.findOne({
                 isArchived: { $ne: true },
                 isActive: { $ne: false },
@@ -106,21 +156,26 @@ function loadAccountingActualSnapshot(payment) {
                     }
                 }
             }).select('transactions.type transactions.status transactions.amount transactions.paymentId').lean(),
-            CompanyAccount_1.CompanyAccount.findOne({
-                transactions: {
+            CompanyAccount_1.CompanyAccount.findOne(Object.assign(Object.assign({}, (companyObjectId ? { companyId: companyObjectId } : {})), { transactions: {
                     $elemMatch: {
                         paymentId: oid,
                         isArchived: { $ne: true }
                     }
-                }
-            }).select('transactions.paymentId transactions.amount transactions.isArchived').lean(),
-            JournalEntry_1.JournalEntry.findOne({
-                sourceId: paymentId,
-                status: 'posted'
-            }).select('_id sourceId').lean(),
-            VatRecord_1.VatRecord.findOne({ transactionId: paymentId }).select('_id transactionId vatCollected').lean(),
-            rentalDeposit_1.RentalDeposit.find({ paymentId: oid, type: 'payment' }).select('_id paymentId depositAmount').lean()
+                } })).select('companyId transactions.paymentId transactions.amount transactions.isArchived').lean(),
+            journalFilter.length
+                ? JournalEntry_1.JournalEntry.find({ $or: journalFilter }).select('_id companyId sourceId sourceModule reference status').lean()
+                : Promise.resolve([]),
+            VatRecord_1.VatRecord.findOne(Object.assign(Object.assign({}, (companyObjectId ? { companyId: companyObjectId } : {})), { transactionId: paymentId })).select('_id companyId transactionId vatCollected').lean(),
+            rentalDeposit_1.RentalDeposit.find(Object.assign(Object.assign({}, (companyObjectId ? { companyId: companyObjectId } : {})), { paymentId: oid, type: 'payment' })).select('_id companyId paymentId depositAmount').lean()
         ]);
+        const journalClass = (0, journalRecoveryAssessment_1.classifyReceiptJournals)({
+            paymentId,
+            companyId: companyObjectId ? String(companyObjectId) : '',
+            reference: receiptReference,
+            sourceModule: receiptModule,
+            journals: journalCandidates
+        });
+        const journalHit = journalClass.ownJournal;
         const incomeTxs = ((propertyAccount === null || propertyAccount === void 0 ? void 0 : propertyAccount.transactions) || []).filter((tx) => String((tx === null || tx === void 0 ? void 0 : tx.type) || '') === 'income'
             && String((tx === null || tx === void 0 ? void 0 : tx.status) || '') === 'completed'
             && String((tx === null || tx === void 0 ? void 0 : tx.idempotencyKey) || '') === `payment:${paymentId}`);
@@ -171,7 +226,9 @@ function loadAccountingActualSnapshot(payment) {
                 ownerIncome: incomeTxs.length || undefined,
                 companyCommission: companyTxs.length || undefined,
                 deposit: deposits.length || undefined
-            }
+            },
+            journalReferenceCollision: journalClass.referenceCollision || undefined,
+            journalOtherCompanyReference: journalClass.otherCompanyReference || undefined
         };
     });
 }
@@ -366,6 +423,13 @@ function ensureDepositLedgerFromPayment(payment, session) {
             return 'skipped';
         if (payment.reversalOfPaymentId || Number(payment.amount || 0) < 0)
             return 'skipped';
+        const { assertPeriodAllowsPosting } = yield Promise.resolve().then(() => __importStar(require('./accountingPeriodService')));
+        yield assertPeriodAllowsPosting({
+            companyId: String(payment.companyId),
+            transactionDate: new Date(payment.paymentDate || Date.now()),
+            sourceModule: 'payment',
+            sourceId: String(payment._id)
+        });
         const filter = { paymentId: payment._id, type: 'payment' };
         const insertDoc = {
             propertyId: payment.propertyId,
@@ -448,6 +512,37 @@ function writeRepairAudit(input) {
         }
     });
 }
+function recoveryAssessmentForPayment(payment, recon) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const companyId = (payment === null || payment === void 0 ? void 0 : payment.companyId) ? String(payment.companyId) : '';
+        let periodStatus = 'UNMANAGED';
+        if (companyId && (payment === null || payment === void 0 ? void 0 : payment.paymentDate)) {
+            const period = yield (0, accountingPeriodService_1.findPeriodForDate)(companyId, new Date(payment.paymentDate));
+            if ((period === null || period === void 0 ? void 0 : period.status) === 'OPEN' || (period === null || period === void 0 ? void 0 : period.status) === 'CLOSED' || (period === null || period === void 0 ? void 0 : period.status) === 'SOFT_CLOSED') {
+                periodStatus = period.status;
+            }
+        }
+        const balance = payment ? (0, journalRecoveryAssessment_1.canonicalReceiptJournalBalance)(payment) : { balanced: false, debit: 0, credit: 0 };
+        return (0, journalRecoveryAssessment_1.assessControlledRecovery)({
+            missingJournal: recon.missing.includes('journal'),
+            journalPresent: Boolean(recon.actual.journal),
+            referenceCollision: Boolean(recon.actual.journalReferenceCollision),
+            otherCompanyReference: Boolean(recon.actual.journalOtherCompanyReference),
+            reversed: (0, journalRecoveryAssessment_1.paymentIsReversed)(payment),
+            companyMatches: Boolean(companyId),
+            periodStatus,
+            journalBalanced: balance.balanced,
+            otherMismatches: (recon.mismatched || []).filter((item) => item !== 'journal')
+        });
+    });
+}
+function postingBlocked(assessment, missingJournal) {
+    return assessment.checks.reversed
+        || !assessment.checks.companyMatches
+        || assessment.checks.duplicateReceiptReference
+        || assessment.checks.periodStatus !== 'OPEN'
+        || (missingJournal && !assessment.checks.journalBalanced);
+}
 /**
  * Explicit, targeted, payment-scoped repair. Never called by the integrity job.
  * Dry-run writes nothing financial. Write mode only creates missing projections via existing writers.
@@ -468,8 +563,9 @@ function repairPaymentAccounting(paymentId, opts) {
         }
         const reconBefore = yield reconcilePayment(paymentId);
         const plan = (0, paymentAccountingProjection_1.buildAccountingRepairPlan)(reconBefore);
-        const payment = yield Payment_1.Payment.findById(paymentId).select('companyId').lean();
+        const payment = yield Payment_1.Payment.findById(paymentId);
         const companyId = (payment === null || payment === void 0 ? void 0 : payment.companyId) ? String(payment.companyId) : undefined;
+        const recoveryAssessment = yield recoveryAssessmentForPayment(payment, reconBefore);
         if (dryRun) {
             yield writeRepairAudit({
                 paymentId,
@@ -495,7 +591,37 @@ function repairPaymentAccounting(paymentId, opts) {
                 accountingStatus: diagnosticStatusFromRecon(reconBefore),
                 componentsCreated: [],
                 componentsSkipped: plan.wouldNotModify,
-                requiresManualReview: plan.requiresManualReview
+                requiresManualReview: plan.requiresManualReview,
+                recoveryAssessment
+            };
+        }
+        if (postingBlocked(recoveryAssessment, reconBefore.missing.includes('journal'))) {
+            yield writeRepairAudit({
+                paymentId,
+                companyId,
+                userId: opts === null || opts === void 0 ? void 0 : opts.userId,
+                reason,
+                dryRun: false,
+                previousStatus: reconBefore.status,
+                previousComplete: reconBefore.accountingComplete,
+                detectedIssues: reconBefore.issues,
+                componentsDetectedMissing: reconBefore.missing,
+                componentsMismatched: reconBefore.mismatched,
+                componentsCreated: [],
+                componentsSkipped: plan.wouldNotModify,
+                result: 'manual_review',
+                finalRecon: reconBefore
+            });
+            return {
+                dryRun: false,
+                recon: reconBefore,
+                plan,
+                accountingComplete: reconBefore.accountingComplete,
+                accountingStatus: diagnosticStatusFromRecon(reconBefore),
+                componentsCreated: [],
+                componentsSkipped: plan.wouldNotModify,
+                requiresManualReview: plan.requiresManualReview,
+                recoveryAssessment
             };
         }
         let postResult = { errors: [] };
@@ -559,7 +685,8 @@ function repairPaymentAccounting(paymentId, opts) {
             accountingStatus: persisted.accountingStatus,
             componentsCreated: created,
             componentsSkipped: plan.wouldNotModify,
-            requiresManualReview: finalPlan.requiresManualReview
+            requiresManualReview: finalPlan.requiresManualReview,
+            recoveryAssessment
         };
     });
 }

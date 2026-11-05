@@ -432,6 +432,13 @@ export async function ensureDepositLedgerFromPayment(
   const depositAmount = Number(payment?.depositAmount || 0);
   if (depositAmount <= 0 || !payment?._id) return 'skipped';
   if (payment.reversalOfPaymentId || Number(payment.amount || 0) < 0) return 'skipped';
+  const { assertPeriodAllowsPosting } = await import('./accountingPeriodService');
+  await assertPeriodAllowsPosting({
+    companyId: String(payment.companyId),
+    transactionDate: new Date(payment.paymentDate || Date.now()),
+    sourceModule: 'payment',
+    sourceId: String(payment._id)
+  });
   const filter = { paymentId: payment._id, type: 'payment' };
   const insertDoc = {
     propertyId: payment.propertyId,
@@ -547,7 +554,7 @@ export type RepairPaymentAccountingResult = {
   recoveryAssessment: ControlledRecoveryAssessment;
 };
 
-async function recoveryAssessmentForPayment(
+export async function recoveryAssessmentForPayment(
   payment: any,
   recon: AccountingReconciliationResult
 ): Promise<ControlledRecoveryAssessment> {
@@ -577,8 +584,7 @@ function postingBlocked(assessment: ControlledRecoveryAssessment, missingJournal
   return assessment.checks.reversed
     || !assessment.checks.companyMatches
     || assessment.checks.duplicateReceiptReference
-    || assessment.checks.periodStatus === 'CLOSED'
-    || assessment.checks.periodStatus === 'SOFT_CLOSED'
+    || assessment.checks.periodStatus !== 'OPEN'
     || (missingJournal && !assessment.checks.journalBalanced);
 }
 

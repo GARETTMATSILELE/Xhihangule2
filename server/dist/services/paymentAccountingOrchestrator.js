@@ -256,12 +256,23 @@ function postPaymentAccounting(paymentId, opts) {
                     journalSeams.add(journalSeamKey);
                     throw new Error('PHASE26_FAIL_JOURNAL');
                 }
-                yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy });
-                artifacts.journal = 'posted';
+                const journalResult = yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy });
+                if (journalResult.receiptJournal === 'posted') {
+                    artifacts.journal = 'posted';
+                }
+                else if (journalResult.reason === 'zero_amount') {
+                    artifacts.journal = 'skipped';
+                }
+                else {
+                    artifacts.journal = 'failed';
+                    errors.push(`journal: ${journalResult.reason || 'receipt journal was not posted'}`);
+                    yield accountingIntegrationService_1.default.recordReceiptJournalFailure(payment, new Error(journalResult.reason || 'receipt journal was not posted'));
+                }
             }
             catch (e) {
                 artifacts.journal = 'failed';
                 errors.push(`journal: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+                yield accountingIntegrationService_1.default.recordReceiptJournalFailure(payment, e);
                 if (!(0, transactionDomain_1.isPermanentAccountingFailure)(e)) {
                     try {
                         yield ledgerEventService_1.default.enqueueEvent('journal', paymentId);

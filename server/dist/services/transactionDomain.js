@@ -116,7 +116,8 @@ function isPermanentAccountingFailure(error) {
     const code = String((error === null || error === void 0 ? void 0 : error.code) || '');
     return (code === 'OWNER_INCOME_AMOUNT_MISSING' ||
         code === 'PAYMENT_DOMAIN_MISSING' ||
-        code === 'ACCOUNTING_CLASSIFICATION_CONFLICT');
+        code === 'ACCOUNTING_CLASSIFICATION_CONFLICT' ||
+        code === 'JOURNAL_REFERENCE_COLLISION');
 }
 function resolveCreateTransactionDomain(input) {
     if (input.entity.kind === 'missing') {

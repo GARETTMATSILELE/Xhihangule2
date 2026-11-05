@@ -243,6 +243,20 @@ const eligible = assessControlledRecovery({
 assert.strictEqual(eligible.eligible, true);
 assert.strictEqual(eligible.checks.financialWrites, false);
 
+const unmanaged = assessControlledRecovery({
+  missingJournal: true,
+  journalPresent: false,
+  referenceCollision: false,
+  otherCompanyReference: false,
+  reversed: false,
+  companyMatches: true,
+  periodStatus: 'UNMANAGED',
+  journalBalanced: true,
+  otherMismatches: []
+});
+assert.strictEqual(unmanaged.eligible, false);
+assert.ok(unmanaged.blockers.includes('period_not_established'));
+
 const closed = assessControlledRecovery({ ...eligible.checks, missingJournal: true, journalPresent: false, referenceCollision: false, otherCompanyReference: false, reversed: false, companyMatches: true, periodStatus: 'CLOSED', journalBalanced: true, otherMismatches: [] });
 assert.strictEqual(closed.eligible, false);
 assert.ok(closed.blockers.includes('period_closed'));

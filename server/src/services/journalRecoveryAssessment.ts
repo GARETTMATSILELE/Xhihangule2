@@ -161,6 +161,7 @@ export function assessControlledRecovery(input: {
   const blockers: string[] = [];
   if (!input.companyMatches) blockers.push('company_mismatch');
   if (input.reversed) blockers.push('reversed_payment');
+  if (input.periodStatus === 'UNMANAGED') blockers.push('period_not_established');
   if (input.periodStatus === 'CLOSED' || input.periodStatus === 'SOFT_CLOSED') blockers.push(`period_${input.periodStatus.toLowerCase()}`);
   if (!input.journalBalanced) blockers.push('journal_unbalanced');
   if (input.referenceCollision) blockers.push('receipt_reference_belongs_to_another_payment');
@@ -170,7 +171,7 @@ export function assessControlledRecovery(input: {
 
   const eligible = input.companyMatches
     && !input.reversed
-    && (input.periodStatus === 'OPEN' || input.periodStatus === 'UNMANAGED')
+    && input.periodStatus === 'OPEN'
     && input.journalBalanced
     && !input.referenceCollision
     && input.missingJournal
@@ -179,7 +180,7 @@ export function assessControlledRecovery(input: {
 
   return {
     eligible,
-    manualReview: !eligible && (input.referenceCollision || input.otherMismatches.length > 0 || !input.journalBalanced || input.reversed || !input.companyMatches || input.periodStatus === 'CLOSED' || input.periodStatus === 'SOFT_CLOSED'),
+    manualReview: !eligible && (input.referenceCollision || input.otherMismatches.length > 0 || !input.journalBalanced || input.reversed || !input.companyMatches || input.periodStatus !== 'OPEN'),
     blockers,
     checks: {
       financialWrites: false,
@@ -191,5 +192,101 @@ export function assessControlledRecovery(input: {
       reversed: input.reversed,
       companyMatches: input.companyMatches
     }
+  };
+}
+
+export type RecoveryApprovalClass =
+  | 'READY FOR RECOVERY'
+  | 'MISSING JOURNAL'
+  | 'HISTORICAL VARIANCE'
+  | 'REFERENCE COLLISION'
+  | 'DEPOSIT RECONCILIATION'
+  | 'PERIOD VERIFICATION'
+  | 'MANUAL REVIEW';
+
+export function classifyRecoveryApproval(input: {
+  periodStatus: RecoveryPeriodStatus;
+  referenceCollision: boolean;
+  historicalVariance: boolean;
+  ownerMismatch: boolean;
+  depositExpected: boolean;
+  depositMissing: boolean;
+  journalBalanced: boolean;
+  reversed: boolean;
+  journalMissing: boolean;
+  companyMatches: boolean;
+  projectionsValid: boolean;
+}): { exceptionClass: RecoveryApprovalClass; recommendedAction: string; readyForApproval: boolean } {
+  const readyForApproval = input.companyMatches
+    && !input.reversed
+    && input.journalBalanced
+    && input.projectionsValid
+    && !input.referenceCollision
+    && !input.historicalVariance
+    && !input.ownerMismatch
+    && !(input.depositExpected && input.depositMissing)
+    && input.periodStatus === 'OPEN'
+    && input.journalMissing;
+
+  if (input.referenceCollision) {
+    return {
+      exceptionClass: 'REFERENCE COLLISION',
+      recommendedAction: 'Do not reassign the existing journal. An accountant must decide which payment owns the receipt reference.',
+      readyForApproval: false
+    };
+  }
+  if (input.reversed || !input.companyMatches) {
+    return {
+      exceptionClass: 'MANUAL REVIEW',
+      recommendedAction: 'Keep the payment unchanged until an accountant reviews it.',
+      readyForApproval: false
+    };
+  }
+  if (input.historicalVariance || input.ownerMismatch) {
+    return {
+      exceptionClass: 'HISTORICAL VARIANCE',
+      recommendedAction: 'Do not reconstruct the stored owner amount. Any correction must be a separately authorised adjustment.',
+      readyForApproval: false
+    };
+  }
+  if (input.depositExpected && input.depositMissing) {
+    return {
+      exceptionClass: 'DEPOSIT RECONCILIATION',
+      recommendedAction: 'Reconcile the deposit ledger before posting. The receipt journal must not include the deposit.',
+      readyForApproval: false
+    };
+  }
+  if (input.periodStatus !== 'OPEN') {
+    return {
+      exceptionClass: 'PERIOD VERIFICATION',
+      recommendedAction: 'No OPEN accounting period covers this date. A missing period is not open.',
+      readyForApproval: false
+    };
+  }
+  if (!input.journalBalanced || !input.projectionsValid) {
+    return {
+      exceptionClass: 'MANUAL REVIEW',
+      recommendedAction: 'The stored snapshot does not support a balanced recovery journal.',
+      readyForApproval: false
+    };
+  }
+  if (readyForApproval) {
+    return {
+      exceptionClass: 'READY FOR RECOVERY',
+      recommendedAction: 'An accountant may approve a single-payment repair through the existing repair pipeline. This screen does not post.',
+      readyForApproval: true
+    };
+  }
+  if (input.journalMissing) {
+    return {
+      exceptionClass: 'MISSING JOURNAL',
+      recommendedAction: 'The receipt journal is absent. Confirm the stored snapshot and an OPEN period before using the existing repair pipeline.',
+      readyForApproval: false
+    };
+  }
+  return {
+    exceptionClass: 'MANUAL REVIEW',
+    recommendedAction: 'Keep the payment unchanged until an accountant reviews it.',
+    readyForApproval: false
   };
 }

@@ -93,14 +93,27 @@ exports.getAccountingPeriods = asyncHandler((req, res) => __awaiter(void 0, void
     return res.json({ status: 'success', data });
 }));
 exports.postAccountingPeriod = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
-    const data = yield (0, accountingPeriodService_1.createAccountingPeriod)({
+    var _a, _b, _c, _d, _e;
+    const financialYear = Number((_a = req.body) === null || _a === void 0 ? void 0 : _a.financialYear);
+    const month = Number((_c = (_b = req.body) === null || _b === void 0 ? void 0 : _b.month) !== null && _c !== void 0 ? _c : (_d = req.body) === null || _d === void 0 ? void 0 : _d.period);
+    const preview = (0, accountingPeriodService_1.previewAccountingPeriod)(financialYear, month);
+    const result = yield (0, accountingPeriodService_1.activateAccountingPeriod)({
         companyId: companyIdOf(req),
-        periodStart: new Date((_a = req.body) === null || _a === void 0 ? void 0 : _a.periodStart),
-        periodEnd: new Date((_b = req.body) === null || _b === void 0 ? void 0 : _b.periodEnd),
-        createdBy: actorIdOf(req)
+        financialYear,
+        month,
+        createdBy: actorIdOf(req),
+        confirmed: ((_e = req.body) === null || _e === void 0 ? void 0 : _e.confirmed) === true
     });
-    return res.status(201).json({ status: 'success', data });
+    return res.status(result.created ? 201 : 200).json({
+        status: 'success',
+        created: result.created,
+        alreadyExisted: result.alreadyExisted,
+        message: result.alreadyExisted
+            ? 'This accounting period already exists for the company. It was not opened again.'
+            : 'Accounting period opened.',
+        preview,
+        data: result.period
+    });
 }));
 exports.closeAccountingPeriodHandler = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;

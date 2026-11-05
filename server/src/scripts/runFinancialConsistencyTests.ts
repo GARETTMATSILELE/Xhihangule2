@@ -20,6 +20,7 @@ import { toPaymentCommissionSnapshot } from '../services/propertyCommissionCalcu
 import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy, stampVatDecision } from '../services/vatPolicyService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
 import { ensureDepositLedgerFromPayment, ensurePaymentAccountingPosted, reconcilePayment } from '../services/paymentAccountingReconciliation';
+import { openExplicitPeriodForDate } from '../services/accountingPeriodService';
 import { RentalDeposit } from '../models/rentalDeposit';
 import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import { prepareVatReturn } from '../services/vatReturnService';
@@ -88,6 +89,10 @@ async function main() {
     ownerId: user._id,
     taxProfile: { vatRegistered: false }
   });
+  for (const ownerCompany of [company, otherCompany]) {
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: new Date(), createdBy: String(user._id) });
+  }
   const exclusive = await Property.create({
     companyId: company._id, ownerId: user._id, name: 'Exclusive House', address: '1 Exclusive Road',
     rentalType: 'management', rent: 1800, commission: 15, vatOnCommission: true, vatCommissionTreatment: 'exclusive'

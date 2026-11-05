@@ -26,6 +26,7 @@ const TaxObligation_1 = require("../models/TaxObligation");
 const agentController_1 = require("../controllers/agentController");
 const paymentController_1 = require("../controllers/paymentController");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const taxIntegrityService_1 = require("../services/taxIntegrityService");
 const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
 const database_1 = require("../config/database");
@@ -131,6 +132,8 @@ function main() {
                 accountant.companyId = row._id;
                 yield agent.save();
                 yield accountant.save();
+                yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(row._id), date: PAYMENT_DATE, createdBy: String(agent._id) });
+                yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(row._id), date: PRIOR_DATE, createdBy: String(agent._id) });
                 return row;
             });
         }

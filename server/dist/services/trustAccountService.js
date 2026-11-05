@@ -62,6 +62,8 @@ const accountingService_1 = __importDefault(require("./accountingService"));
 const principalAgentJournal_1 = require("./tax/principalAgentJournal");
 const TaxOverride_1 = require("../models/TaxOverride");
 const errorHandler_1 = require("../middleware/errorHandler");
+const accountingPeriodService_1 = require("./accountingPeriodService");
+const accountingDatePolicy_1 = require("./accountingDatePolicy");
 const money = (n) => Number(Number(n || 0).toFixed(2));
 const toObjectId = (id) => new mongoose_1.default.Types.ObjectId(id);
 const WORKFLOW_TRANSITIONS = {
@@ -275,6 +277,25 @@ class TrustAccountService {
     }
     postTransaction(input) {
         return __awaiter(this, void 0, void 0, function* () {
+            let originalTransactionDate = input.originalTransactionDate;
+            if (!originalTransactionDate && input.paymentId) {
+                const payment = yield Payment_1.Payment.findById(input.paymentId).select('paymentDate').lean();
+                if (payment === null || payment === void 0 ? void 0 : payment.paymentDate)
+                    originalTransactionDate = new Date(payment.paymentDate);
+            }
+            const dates = (0, accountingDatePolicy_1.resolveAccountingDates)({
+                originalTransactionDate,
+                accountingDate: input.accountingDate,
+                settlementDate: input.settlementDate,
+                bankPaymentDate: input.bankPaymentDate
+            });
+            yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+                companyId: input.companyId,
+                transactionDate: dates.accountingDate,
+                actorId: input.createdBy,
+                sourceModule: 'trust',
+                sourceId: input.paymentId
+            });
             yield this.ensureIndexes();
             return this.withOptionalTransaction((session) => __awaiter(this, void 0, void 0, function* () {
                 const account = yield TrustAccount_1.TrustAccount.findOne({
@@ -335,6 +356,10 @@ class TrustAccountService {
                         runningBalance: nextBalance,
                         reference: input.reference,
                         sourceEvent: input.sourceEvent,
+                        originalTransactionDate: dates.originalTransactionDate || undefined,
+                        accountingDate: dates.accountingDate,
+                        settlementDate: dates.settlementDate || undefined,
+                        bankPaymentDate: dates.bankPaymentDate || undefined,
                         createdBy: input.createdBy ? toObjectId(input.createdBy) : undefined
                     }
                 ], session ? { session } : undefined).catch((error) => __awaiter(this, void 0, void 0, function* () {
@@ -578,13 +603,20 @@ class TrustAccountService {
                     { type: 'VAT_ON_COMMISSION', amount: vatOnCommission },
                     { type: 'VAT', amount: vatOnSale }
                 ].filter((d) => d.amount > 0);
+                const priorSettlement = yield TrustSettlement_1.TrustSettlement.findOne({
+                    companyId: toObjectId(input.companyId),
+                    trustAccountId: account._id
+                }).select('settlementDate').session(session || null).lean();
+                const preservedSettlementDate = (priorSettlement === null || priorSettlement === void 0 ? void 0 : priorSettlement.settlementDate)
+                    ? new Date(priorSettlement.settlementDate)
+                    : saleDate;
                 const settlement = yield TrustSettlement_1.TrustSettlement.findOneAndUpdate({ companyId: toObjectId(input.companyId), trustAccountId: account._id }, {
                     $set: {
                         salePrice: derivedSalePrice,
                         grossProceeds: derivedSalePrice,
                         deductions,
                         netPayout: sellerNetPayout,
-                        settlementDate: new Date(),
+                        settlementDate: preservedSettlementDate,
                         cgtSnapshot: Object.assign(Object.assign({}, summaryBase.cgt), { calculatedAt: new Date(), calculatedBy: input.createdBy }),
                         cgwtSnapshot: Object.assign(Object.assign({}, summaryBase.cgwt), { calculatedAt: new Date(), calculatedBy: input.createdBy }),
                         waterfall: summaryBase.waterfall,
@@ -712,7 +744,10 @@ class TrustAccountService {
                             type: 'COMMISSION_DEDUCTION',
                             debit: deltaToApply,
                             reference: `settlement:${settlement._id}:commission`,
-                            createdBy: input.createdBy
+                            createdBy: input.createdBy,
+                            originalTransactionDate: settlement.settlementDate ? new Date(settlement.settlementDate) : undefined,
+                            accountingDate: settlement.settlementDate ? new Date(settlement.settlementDate) : undefined,
+                            settlementDate: settlement.settlementDate ? new Date(settlement.settlementDate) : undefined
                         });
                         postedAnyDeduction = true;
                         continue;
@@ -802,7 +837,7 @@ class TrustAccountService {
                         description: `Withhold ${canonicalTaxType} from seller trust`,
                         sourceModule: 'trust',
                         sourceId: `trust-tax:${settlement._id}:${canonicalTaxType}`,
-                        transactionDate: new Date(),
+                        transactionDate: taxPoint,
                         createdBy: input.createdBy,
                         lines: withholdingLines
                     });

@@ -14,7 +14,6 @@ import { buildTrialBalance } from './trialBalanceService';
 import { detectDuplicatePayments } from './duplicatePaymentReviewService';
 import { detectNegativeBalances } from './negativeBalanceReviewService';
 import { canonicalRentLevyExample } from './ownerPropertyReconService';
-import { ensureCurrentOpenPeriod } from './accountingPeriodService';
 import { BankTransaction } from '../models/BankTransaction';
 
 const toId = (value: string) => new mongoose.Types.ObjectId(value);
@@ -141,7 +140,6 @@ export async function runFinancialIntegrityChecks(companyId: string): Promise<{
 }
 
 export async function buildFinancialControlsDashboard(companyId: string) {
-  await ensureCurrentOpenPeriod(companyId);
   const [
     trialBalance,
     glRows,

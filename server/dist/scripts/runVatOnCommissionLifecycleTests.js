@@ -31,6 +31,7 @@ const propertyCommissionCalculator_1 = require("../services/propertyCommissionCa
 const vatPolicyService_1 = require("../services/vatPolicyService");
 const taxRuleRegistry_1 = require("../services/taxRuleRegistry");
 const paymentAccountingReconciliation_1 = require("../services/paymentAccountingReconciliation");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const paymentAccountingOrchestrator_1 = require("../services/paymentAccountingOrchestrator");
 const vatReturnService_1 = require("../services/vatReturnService");
 const taxIntegrityService_1 = require("../services/taxIntegrityService");
@@ -162,6 +163,11 @@ function main() {
             ownerId: user._id,
             taxProfile: { vatRegistered: true }
         });
+        for (const ownerCompany of [registered, unregistered, noRate]) {
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: PRIOR_RATE_DATE, createdBy: String(user._id) });
+            yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(ownerCompany._id), date: new Date(), createdBy: String(user._id) });
+        }
         function makeProperty(companyId, name, commission, vatOn, treatment) {
             return __awaiter(this, void 0, void 0, function* () {
                 return Property_1.Property.create({

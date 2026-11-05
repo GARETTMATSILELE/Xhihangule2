@@ -53,6 +53,10 @@ const TrustTransactionSchema = new mongoose_1.Schema({
     runningBalance: { type: Number, required: true },
     reference: { type: String, required: false, trim: true },
     sourceEvent: { type: String, required: false, trim: true },
+    originalTransactionDate: { type: Date, required: false, immutable: true },
+    accountingDate: { type: Date, required: false, immutable: true },
+    settlementDate: { type: Date, required: false, immutable: true },
+    bankPaymentDate: { type: Date, required: false, immutable: true },
     createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: false, immutable: true }
 }, { timestamps: true });
 TrustTransactionSchema.index({ trustAccountId: 1, createdAt: -1 });

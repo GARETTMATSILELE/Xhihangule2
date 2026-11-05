@@ -5,6 +5,7 @@
 import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { Company } from '../models/Company';
+import { AccountingPeriod } from '../models/AccountingPeriod';
 import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
 import { Payment } from '../models/Payment';
@@ -26,6 +27,7 @@ import { retryFailedLedgerEvent } from '../controllers/paymentAccountingIntegrit
 import { listCompanyAccountingInconsistencies } from '../services/paymentAccountingIntegrity';
 import { upsertFinancialReview } from '../services/financialOperationVisibility';
 import { accountingConnection } from '../config/database';
+import { utcMonthBounds } from '../services/accountingPeriodService';
 
 const DB = process.env.INTEGRITY_GAP_DB || 'mongodb://127.0.0.1:27017/mantis_integrity_gap_test';
 const ACCOUNTING_DB = process.env.INTEGRITY_GAP_ACCOUNTING_DB || 'mongodb://127.0.0.1:27017/mantis_integrity_gap_accounting';
@@ -78,6 +80,21 @@ async function main() {
     name: 'Other Integrity Co', address: '2 Integrity Street', phone: '0770000402', email: 'other-integrity@example.test',
     registrationNumber: 'GAP-2', tinNumber: 'GAP-TIN-2', country: 'Zimbabwe', ownerId: user._id
   });
+  const october = utcMonthBounds(new Date('2026-10-15T00:00:00.000Z'));
+  for (const ownerCompany of [company, otherCompany]) {
+    await AccountingPeriod.create({
+      companyId: ownerCompany._id,
+      financialYear: 2026,
+      period: 10,
+      month: 10,
+      periodStart: october.periodStart,
+      periodEnd: october.periodEnd,
+      startDate: october.periodStart,
+      endDate: october.periodEnd,
+      status: 'OPEN',
+      createdBy: user._id
+    });
+  }
 
   async function makeProperty(ownerCompany: any, name: string) {
     return Property.create({

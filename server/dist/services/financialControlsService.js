@@ -32,7 +32,6 @@ const trialBalanceService_1 = require("./trialBalanceService");
 const duplicatePaymentReviewService_1 = require("./duplicatePaymentReviewService");
 const negativeBalanceReviewService_1 = require("./negativeBalanceReviewService");
 const ownerPropertyReconService_1 = require("./ownerPropertyReconService");
-const accountingPeriodService_1 = require("./accountingPeriodService");
 const BankTransaction_1 = require("../models/BankTransaction");
 const toId = (value) => new mongoose_1.default.Types.ObjectId(value);
 function upsertException(input) {
@@ -131,7 +130,6 @@ function runFinancialIntegrityChecks(companyId) {
 }
 function buildFinancialControlsDashboard(companyId) {
     return __awaiter(this, void 0, void 0, function* () {
-        yield (0, accountingPeriodService_1.ensureCurrentOpenPeriod)(companyId);
         const [trialBalance, glRows, openControl, openAccounting, openTax, pendingApprovals, closedPeriods, unreconciledBank, currentPeriod] = yield Promise.all([
             (0, trialBalanceService_1.buildTrialBalance)({ companyId }),
             ChartOfAccount_1.ChartOfAccount.find({

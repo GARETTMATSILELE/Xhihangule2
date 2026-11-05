@@ -2484,6 +2484,7 @@ const getPaymentDetails = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.getPaymentDetails = getPaymentDetails;
 const getPaymentAccountingReconciliation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -2494,6 +2495,36 @@ const getPaymentAccountingReconciliation = (req, res) => __awaiter(void 0, void 
         if (!payment || !(yield paymentRecordVisible(req, payment)))
             return res.status(404).json({ message: 'Payment not found' });
         const recon = yield (0, paymentAccountingReconciliation_1.reconcilePayment)(String(payment._id));
+        const { recoveryAssessmentForPayment } = yield Promise.resolve().then(() => __importStar(require('../services/paymentAccountingReconciliation')));
+        const fullPayment = yield Payment_1.Payment.findById(payment._id);
+        const recoveryAssessment = fullPayment ? yield recoveryAssessmentForPayment(fullPayment, recon) : null;
+        const { classifyRecoveryApproval } = yield Promise.resolve().then(() => __importStar(require('../services/journalRecoveryAssessment')));
+        const depositExpected = Boolean((_a = recon.expected) === null || _a === void 0 ? void 0 : _a.deposit);
+        const depositMissing = (recon.missing || []).includes('deposit');
+        const ownerMismatch = (recon.mismatched || []).includes('ownerIncome');
+        const details = (fullPayment === null || fullPayment === void 0 ? void 0 : fullPayment.commissionDetails) || {};
+        const cents = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+        const storedOwner = cents(details.ownerAmount);
+        const formulaOwner = cents(Number((fullPayment === null || fullPayment === void 0 ? void 0 : fullPayment.amount) || 0)
+            - Number(details.commissionNet || details.totalCommission || 0)
+            - Number(details.vatOnCommission || details.vatAmount || 0)
+            - Number((_c = (_b = details.levy) !== null && _b !== void 0 ? _b : fullPayment === null || fullPayment === void 0 ? void 0 : fullPayment.levyAllocated) !== null && _c !== void 0 ? _c : 0));
+        const historicalVariance = Boolean(fullPayment) && Math.abs(storedOwner - formulaOwner) > 0.02;
+        const approval = classifyRecoveryApproval({
+            periodStatus: ((_d = recoveryAssessment === null || recoveryAssessment === void 0 ? void 0 : recoveryAssessment.checks) === null || _d === void 0 ? void 0 : _d.periodStatus) || 'UNMANAGED',
+            referenceCollision: Boolean(((_e = recoveryAssessment === null || recoveryAssessment === void 0 ? void 0 : recoveryAssessment.checks) === null || _e === void 0 ? void 0 : _e.duplicateReceiptReference) || ((_f = recon.actual) === null || _f === void 0 ? void 0 : _f.journalReferenceCollision)),
+            historicalVariance,
+            ownerMismatch,
+            depositExpected,
+            depositMissing,
+            journalBalanced: Boolean((_g = recoveryAssessment === null || recoveryAssessment === void 0 ? void 0 : recoveryAssessment.checks) === null || _g === void 0 ? void 0 : _g.journalBalanced),
+            reversed: Boolean((_h = recoveryAssessment === null || recoveryAssessment === void 0 ? void 0 : recoveryAssessment.checks) === null || _h === void 0 ? void 0 : _h.reversed),
+            journalMissing: (recon.missing || []).includes('journal'),
+            companyMatches: ((_j = recoveryAssessment === null || recoveryAssessment === void 0 ? void 0 : recoveryAssessment.checks) === null || _j === void 0 ? void 0 : _j.companyMatches) !== false,
+            projectionsValid: !(recon.mismatched || []).some((item) => item !== 'journal')
+        });
+        const exceptionClass = approval.exceptionClass;
+        const recommendedAction = approval.recommendedAction;
         const { loadLegacyIntroductionContextRisk } = yield Promise.resolve().then(() => __importStar(require('../services/legacyIntroductionRisk')));
         const { buildPaymentIntegrityDiagnostic, detectCurrencyMismatch } = yield Promise.resolve().then(() => __importStar(require('../services/paymentIntegrityDiagnostic')));
         let legacyIntroductionRisk = null;
@@ -2505,10 +2536,12 @@ const getPaymentAccountingReconciliation = (req, res) => __awaiter(void 0, void 
                 leaseId: payment.leaseId
             });
         }
-        catch (_a) {
+        catch (_k) {
             legacyIntroductionRisk = null;
         }
-        return res.json(Object.assign(Object.assign({}, recon), { diagnostic: buildPaymentIntegrityDiagnostic({
+        return res.json(Object.assign(Object.assign({}, recon), { recoveryAssessment,
+            exceptionClass,
+            recommendedAction, readyForApproval: approval.readyForApproval, diagnostic: buildPaymentIntegrityDiagnostic({
                 payment,
                 recon,
                 legacyIntroductionRisk,

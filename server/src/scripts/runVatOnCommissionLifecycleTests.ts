@@ -17,6 +17,7 @@ import { toPaymentCommissionSnapshot } from '../services/propertyCommissionCalcu
 import { resolveCommissionVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock } from '../services/vatPolicyService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
 import { ensurePaymentAccountingPosted } from '../services/paymentAccountingReconciliation';
+import { openExplicitPeriodForDate } from '../services/accountingPeriodService';
 import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import { prepareVatReturn } from '../services/vatReturnService';
 import { detectVatOnCommissionExceptions } from '../services/taxIntegrityService';
@@ -160,6 +161,11 @@ async function main() {
     ownerId: user._id,
     taxProfile: { vatRegistered: true }
   });
+  for (const ownerCompany of [registered, unregistered, noRate]) {
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: PAYMENT_DATE, createdBy: String(user._id) });
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: PRIOR_RATE_DATE, createdBy: String(user._id) });
+    await openExplicitPeriodForDate({ companyId: String(ownerCompany._id), date: new Date(), createdBy: String(user._id) });
+  }
 
   async function makeProperty(companyId: mongoose.Types.ObjectId, name: string, commission: number, vatOn: boolean, treatment?: 'inclusive' | 'exclusive') {
     return Property.create({
