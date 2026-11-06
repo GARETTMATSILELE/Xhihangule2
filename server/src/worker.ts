@@ -5,6 +5,7 @@ import { getRuntimeFeatures } from './config/runtimeRole';
 import { initializeSyncServices, shutdownSyncServices } from './scripts/startSyncServices';
 import { startTrustEventListener, stopTrustEventListener } from './services/trustEventListener';
 import { startTrustReconciliationJob, stopTrustReconciliationJob } from './jobs/trustReconciliationJob';
+import { ACCOUNTING_POSTING_RULESET } from './services/accountingPeriodService';
 
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 const ENV_PATH = path.resolve(__dirname, '..', ENV_FILE);
@@ -15,6 +16,7 @@ const runtimeFeatures = getRuntimeFeatures();
 const startWorker = async (): Promise<void> => {
   console.log('Starting worker runtime with configuration:', {
     role: runtimeFeatures.role,
+    accountingRuleset: ACCOUNTING_POSTING_RULESET,
     runSyncSchedules: runtimeFeatures.runSyncSchedules,
     runTrustBackground: runtimeFeatures.runTrustBackground
   });

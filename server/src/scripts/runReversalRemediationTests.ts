@@ -751,6 +751,27 @@ async function main() {
     workspaceType: 'individual',
     plan: 'INDIVIDUAL'
   });
+  for (const date of [PAYMENT_DATE, new Date()]) {
+    const bounds = utcMonthBounds(date);
+    const existing = await AccountingPeriod.findOne({
+      companyId: individualCompany._id,
+      periodStart: bounds.periodStart,
+      periodEnd: bounds.periodEnd
+    }).select('_id').lean();
+    if (existing) continue;
+    await AccountingPeriod.create({
+      companyId: individualCompany._id,
+      financialYear: bounds.periodStart.getUTCFullYear(),
+      period: bounds.periodStart.getUTCMonth() + 1,
+      month: bounds.periodStart.getUTCMonth() + 1,
+      periodStart: bounds.periodStart,
+      periodEnd: bounds.periodEnd,
+      startDate: bounds.periodStart,
+      endDate: bounds.periodEnd,
+      status: 'OPEN',
+      createdBy: user._id
+    });
+  }
   const individualProperty = await Property.create({
     companyId: individualCompany._id,
     ownerId: user._id,

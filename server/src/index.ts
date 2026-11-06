@@ -57,6 +57,7 @@ import adminRoutes from './routes/adminRoutes';
 import enterpriseReportingRoutes from './reporting/api';
 import { connectDatabase, closeDatabase, getDatabaseHealth, isDatabaseAvailable } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
+import { ACCOUNTING_POSTING_RULESET } from './services/accountingPeriodService';
 import { createServer } from 'http';
 import { initializeSocket } from './config/socket';
 import { initializeSyncServices } from './scripts/startSyncServices';
@@ -132,6 +133,7 @@ app.use((req, res, next) => {
 
 console.log('Runtime role configuration:', {
   role: runtimeFeatures.role,
+  accountingRuleset: ACCOUNTING_POSTING_RULESET,
   runHttpServer: runtimeFeatures.runHttpServer,
   runSyncSchedules: runtimeFeatures.runSyncSchedules,
   runTrustBackground: runtimeFeatures.runTrustBackground,

@@ -104,6 +104,7 @@ const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const api_1 = __importDefault(require("./reporting/api"));
 const database_1 = require("./config/database");
 const errorHandler_1 = require("./middleware/errorHandler");
+const accountingPeriodService_1 = require("./services/accountingPeriodService");
 const http_1 = require("http");
 const socket_1 = require("./config/socket");
 const startSyncServices_1 = require("./scripts/startSyncServices");
@@ -171,6 +172,7 @@ app.use((req, res, next) => {
 });
 console.log('Runtime role configuration:', {
     role: runtimeFeatures.role,
+    accountingRuleset: accountingPeriodService_1.ACCOUNTING_POSTING_RULESET,
     runHttpServer: runtimeFeatures.runHttpServer,
     runSyncSchedules: runtimeFeatures.runSyncSchedules,
     runTrustBackground: runtimeFeatures.runTrustBackground,

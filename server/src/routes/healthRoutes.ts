@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import { getDatabaseHealth, getAccountingDatabaseHealth } from '../config/database';
+import { ACCOUNTING_POSTING_RULESET } from '../services/accountingPeriodService';
 import LedgerEvent from '../models/LedgerEvent';
 
 const router = express.Router();
@@ -21,7 +22,11 @@ router.use((req, res, next) => {
 
 // Liveness probe: process is up
 router.get('/live', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    accountingRuleset: ACCOUNTING_POSTING_RULESET
+  });
 });
 
 // Some platforms issue HEAD requests for health checks
@@ -83,6 +88,7 @@ router.get('/', (req, res) => {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
+      accountingRuleset: ACCOUNTING_POSTING_RULESET,
       database: dbHealth,
       accountingDatabase: accountingDbHealth,
       uptime

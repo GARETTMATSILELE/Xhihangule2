@@ -12,11 +12,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ACCOUNTING_POSTING_RULESET = void 0;
 exports.rangesOverlap = rangesOverlap;
 exports.calendarPeriodIdentity = calendarPeriodIdentity;
 exports.decidePeriodPosting = decidePeriodPosting;
 exports.previewAccountingPeriod = previewAccountingPeriod;
 exports.assertPeriodActivationConfirmed = assertPeriodActivationConfirmed;
+exports.isCurrentAccountingMonth = isCurrentAccountingMonth;
 exports.utcMonthBounds = utcMonthBounds;
 exports.listAccountingPeriods = listAccountingPeriods;
 exports.openExplicitPeriodForDate = openExplicitPeriodForDate;
@@ -25,6 +27,7 @@ exports.ensurePeriodIdentityIndex = ensurePeriodIdentityIndex;
 exports.activateAccountingPeriod = activateAccountingPeriod;
 exports.createAccountingPeriod = createAccountingPeriod;
 exports.findPeriodForDate = findPeriodForDate;
+exports.ensureCurrentPeriodForFinancialOperation = ensureCurrentPeriodForFinancialOperation;
 exports.assertPeriodAllowsPosting = assertPeriodAllowsPosting;
 exports.closeAccountingPeriod = closeAccountingPeriod;
 exports.reopenAccountingPeriod = reopenAccountingPeriod;
@@ -70,6 +73,11 @@ function assertPeriodActivationConfirmed(confirmed) {
     if (confirmed !== true) {
         throw new errorHandler_1.AppError('Explicit confirmation is required before an accounting period can be opened.', 400, 'PERIOD_CONFIRMATION_REQUIRED');
     }
+}
+exports.ACCOUNTING_POSTING_RULESET = 'current-month-auto-2026-11';
+function isCurrentAccountingMonth(transactionDate, now = new Date()) {
+    return transactionDate.getUTCFullYear() === now.getUTCFullYear()
+        && transactionDate.getUTCMonth() === now.getUTCMonth();
 }
 function utcMonthBounds(date = new Date()) {
     const periodStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
@@ -180,9 +188,10 @@ function insertOpenPeriod(input) {
                 companyId: input.companyId,
                 eventType: 'period_created',
                 sourceId: String(created._id),
-                message: 'Period opened explicitly',
+                message: input.automatic ? 'Current accounting period opened automatically' : 'Period opened explicitly',
                 metadata: {
                     actorId: input.createdBy,
+                    automatic: Boolean(input.automatic),
                     financialYear: input.financialYear,
                     period: input.month,
                     before: null,
@@ -243,15 +252,47 @@ function findPeriodForDate(companyId, transactionDate) {
     });
 }
 /**
- * A missing period is not open. CLOSED rejects. SOFT_CLOSED requires an authorised reason.
+ * Safe monthly rollover for one company.
+ * The first financial write in the clock's current month establishes that month as OPEN.
+ * Earlier months are not created, closed, reopened, or rewritten. A dashboard read does not call this.
+ */
+function ensureCurrentPeriodForFinancialOperation(input) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!isCurrentAccountingMonth(input.transactionDate))
+            return;
+        const existing = yield findPeriodForDate(input.companyId, input.transactionDate);
+        if (existing)
+            return;
+        const { periodStart, periodEnd } = utcMonthBounds(input.transactionDate);
+        const identity = calendarPeriodIdentity(periodStart, periodEnd);
+        const actorId = input.actorId && mongoose_1.default.Types.ObjectId.isValid(input.actorId) ? input.actorId : undefined;
+        yield insertOpenPeriod({
+            companyId: input.companyId,
+            financialYear: identity.financialYear,
+            month: identity.period,
+            periodStart,
+            periodEnd,
+            createdBy: actorId,
+            automatic: true
+        });
+    });
+}
+/**
+ * A missing historical period is not open. The current month is established automatically.
+ * CLOSED rejects. SOFT_CLOSED requires an authorised reason. A closed period is never reopened here.
  */
 function assertPeriodAllowsPosting(input) {
     return __awaiter(this, void 0, void 0, function* () {
+        yield ensureCurrentPeriodForFinancialOperation({
+            companyId: input.companyId,
+            transactionDate: input.transactionDate,
+            actorId: input.actorId
+        });
         const period = yield findPeriodForDate(input.companyId, input.transactionDate);
         const decision = decidePeriodPosting((period === null || period === void 0 ? void 0 : period.status) || null, input.overrideReason);
         if (!decision.allowed) {
             const message = decision.code === 'PERIOD_NOT_ESTABLISHED'
-                ? 'No accounting period covers this date. A missing period is not open. Create an OPEN period for this company before posting.'
+                ? 'No accounting period covers this date. Historical periods are not opened automatically.'
                 : decision.code === 'PERIOD_SOFT_CLOSED'
                     ? `Period ${period === null || period === void 0 ? void 0 : period.periodStart.toISOString().slice(0, 10)} is SOFT_CLOSED. An accountant override reason is required to post.`
                     : `Period ${period === null || period === void 0 ? void 0 : period.periodStart.toISOString().slice(0, 10)} is CLOSED. Corrections must use a reversal plus a new posting in an open period.`;

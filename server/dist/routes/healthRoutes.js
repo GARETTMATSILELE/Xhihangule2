@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const database_1 = require("../config/database");
+const accountingPeriodService_1 = require("../services/accountingPeriodService");
 const LedgerEvent_1 = __importDefault(require("../models/LedgerEvent"));
 const router = express_1.default.Router();
 // Optional verbose health logging (disabled by default in production)
@@ -32,7 +33,11 @@ router.use((req, res, next) => {
 });
 // Liveness probe: process is up
 router.get('/live', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        accountingRuleset: accountingPeriodService_1.ACCOUNTING_POSTING_RULESET
+    });
 });
 // Some platforms issue HEAD requests for health checks
 router.head('/live', (req, res) => {
@@ -88,6 +93,7 @@ router.get('/', (req, res) => {
         res.json({
             status: 'ok',
             timestamp: new Date().toISOString(),
+            accountingRuleset: accountingPeriodService_1.ACCOUNTING_POSTING_RULESET,
             database: dbHealth,
             accountingDatabase: accountingDbHealth,
             uptime

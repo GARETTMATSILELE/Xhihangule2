@@ -1,6 +1,7 @@
 import assert from 'assert';
 import mongoose from 'mongoose';
 import { AccountingPeriod } from '../models/AccountingPeriod';
+import { AccountingEventLog } from '../models/AccountingEventLog';
 import { isAccountant } from '../middleware/roles';
 import { resolveAccountingDates } from '../services/accountingDatePolicy';
 import {
@@ -159,6 +160,90 @@ async function main() {
     () => assertPeriodAllowsPosting({ companyId: companyA, transactionDate: historical, sourceModule: 'trust' }),
     'PERIOD_CLOSED'
   );
+
+  const companyC = new mongoose.Types.ObjectId().toString();
+  const currentDate = new Date();
+  assert.strictEqual(await ensureCurrentOpenPeriod(companyC), null);
+  assert.strictEqual(await AccountingPeriod.countDocuments({ companyId: companyC }), 0);
+  const [autoA, autoB] = await Promise.all([
+    assertPeriodAllowsPosting({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment', sourceId: 'auto-a' }),
+    assertPeriodAllowsPosting({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment', sourceId: 'auto-b' })
+  ]);
+  assert.strictEqual(autoA.periodStatus, 'OPEN');
+  assert.strictEqual(autoB.periodStatus, 'OPEN');
+  const automaticRows = await AccountingPeriod.find({ companyId: companyC });
+  assert.strictEqual(automaticRows.length, 1);
+  assert.strictEqual(automaticRows[0].status, 'OPEN');
+  assert.strictEqual(automaticRows[0].financialYear, currentDate.getUTCFullYear());
+  assert.strictEqual(automaticRows[0].month, currentDate.getUTCMonth() + 1);
+  const createdEvents = await AccountingEventLog.find({ companyId: companyC, eventType: 'period_created' });
+  assert.strictEqual(createdEvents.length, 1);
+  assert.strictEqual((createdEvents[0].metadata as any)?.automatic, true);
+  await rejects(
+    () => assertPeriodAllowsPosting({ companyId: companyC, transactionDate: historical, sourceModule: 'payment' }),
+    'PERIOD_NOT_ESTABLISHED'
+  );
+  assert.strictEqual(await AccountingPeriod.countDocuments({ companyId: companyC, financialYear: 2025 }), 0);
+  await closeAccountingPeriod({
+    companyId: companyC,
+    periodId: String(automaticRows[0]._id),
+    actorId: accountant,
+    reason: 'Soft close must still require a reason',
+    status: 'SOFT_CLOSED'
+  });
+  await rejects(
+    () => assertPeriodAllowsPosting({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment' }),
+    'PERIOD_SOFT_CLOSED'
+  );
+  await assertPeriodAllowsPosting({
+    companyId: companyC,
+    transactionDate: currentDate,
+    sourceModule: 'payment',
+    overrideReason: 'Authorised current-month adjustment'
+  });
+  await closeAccountingPeriod({
+    companyId: companyC,
+    periodId: String(automaticRows[0]._id),
+    actorId: accountant,
+    reason: 'Closed current month must stay closed',
+    status: 'CLOSED'
+  });
+  await rejects(
+    () => assertPeriodAllowsPosting({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment' }),
+    'PERIOD_CLOSED'
+  );
+  const closedCurrent = await AccountingPeriod.findById(automaticRows[0]._id);
+  assert.strictEqual(closedCurrent?.status, 'CLOSED');
+
+  const companyD = new mongoose.Types.ObjectId().toString();
+  const previousMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() - 1, 15));
+  const previous = await activateAccountingPeriod({
+    companyId: companyD,
+    financialYear: previousMonth.getUTCFullYear(),
+    month: previousMonth.getUTCMonth() + 1,
+    createdBy: accountant,
+    confirmed: true
+  });
+  await assertPeriodAllowsPosting({
+    companyId: companyD,
+    transactionDate: currentDate,
+    sourceModule: 'payment',
+    sourceId: 'rollover'
+  });
+  const rolled = await AccountingPeriod.find({ companyId: companyD }).sort({ periodStart: 1 });
+  assert.strictEqual(rolled.length, 2);
+  const stillOpenPrevious = rolled.find((row) => String(row._id) === String(previous.period._id));
+  const establishedCurrent = rolled.find((row) => row.financialYear === currentDate.getUTCFullYear() && row.month === currentDate.getUTCMonth() + 1);
+  assert.strictEqual(stillOpenPrevious?.status, 'OPEN');
+  assert.strictEqual(establishedCurrent?.status, 'OPEN');
+  assert.notStrictEqual(String(stillOpenPrevious?._id), String(establishedCurrent?._id));
+  await assertPeriodAllowsPosting({
+    companyId: companyD,
+    transactionDate: previousMonth,
+    sourceModule: 'payment'
+  });
+  assert.strictEqual(await AccountingPeriod.countDocuments({ companyId: companyB }), 1);
+  assert.strictEqual(await AccountingPeriod.countDocuments({ companyId: companyD, financialYear: 2020 }), 0);
 
   await mongoose.disconnect();
   console.log('accounting period concurrency tests passed');

@@ -160,6 +160,28 @@ export class PropertyAccountService {
     return undefined;
   }
 
+  private async assertPropertyLedgerPeriod(input: {
+    propertyId: string;
+    companyId?: string;
+    transactionDate: Date;
+    sourceModule: string;
+    sourceId?: string;
+    actorId?: string;
+  }): Promise<void> {
+    const companyId = input.companyId || await this.resolveCompanyIdForEntity(input.propertyId);
+    if (!companyId) {
+      throw new AppError('This property ledger entry has no company and was not posted', 409, 'COMPANY_REQUIRED');
+    }
+    const { assertPeriodAllowsPosting } = await import('./accountingPeriodService');
+    await assertPeriodAllowsPosting({
+      companyId,
+      transactionDate: input.transactionDate,
+      actorId: input.actorId,
+      sourceModule: input.sourceModule,
+      sourceId: input.sourceId
+    });
+  }
+
   private notifyAccountUpdated(opts: {
     companyId?: any;
     propertyId?: string;
@@ -723,6 +745,15 @@ export class PropertyAccountService {
       updatedAt: new Date()
     };
 
+    await this.assertPropertyLedgerPeriod({
+      propertyId: input.propertyId,
+      companyId: input.companyId,
+      transactionDate: transaction.date,
+      sourceModule: 'property_pass_through_collection',
+      sourceId: idKey,
+      actorId: input.processedBy
+    });
+
     const pushed = await this.pushPassThroughTransactionAtomic({
       account,
       propertyId: input.propertyId,
@@ -795,6 +826,15 @@ export class PropertyAccountService {
       updatedAt: new Date()
     };
 
+    await this.assertPropertyLedgerPeriod({
+      propertyId: input.propertyId,
+      companyId: input.companyId,
+      transactionDate: transaction.date,
+      sourceModule: 'property_pass_through_payment',
+      sourceId: idKey,
+      actorId: input.processedBy
+    });
+
     const pushed = await this.pushPassThroughTransactionAtomic({
       account,
       propertyId: input.propertyId,
@@ -859,6 +899,13 @@ export class PropertyAccountService {
             reversed += 1;
             continue;
           }
+          await this.assertPropertyLedgerPeriod({
+            propertyId: String((account as any).propertyId),
+            transactionDate: new Date(),
+            sourceModule: 'property_pass_through_reversal',
+            sourceId: idKey,
+            actorId: opts?.processedBy
+          });
           const chargeType = this.normalizePassThroughType(String(tx?.chargeTypeCode || bucket?.type || 'OTHER'));
           const pushed = await this.pushPassThroughTransactionAtomic({
             account: account as IPropertyAccount,
@@ -1815,6 +1862,19 @@ export class PropertyAccountService {
 
       let countered = false;
       let configuredExpense: 'reversed' | 'absent' = 'absent';
+      let reversalPeriodChecked = false;
+      const assertIncomeReversalPeriod = async (sourceId: string) => {
+        if (reversalPeriodChecked) return;
+        await this.assertPropertyLedgerPeriod({
+          propertyId: String(payment.propertyId),
+          companyId: payment.companyId ? String(payment.companyId) : undefined,
+          transactionDate: new Date(),
+          sourceModule: 'property_income_reversal',
+          sourceId,
+          actorId: opts?.processedBy
+        });
+        reversalPeriodChecked = true;
+      };
 
       for (const target of targets) {
         const account = this.validateWritableAccount(
@@ -1853,6 +1913,7 @@ export class PropertyAccountService {
             createdAt: new Date(),
             updatedAt: new Date()
           };
+          await assertIncomeReversalPeriod(incomeKey);
           await PropertyAccount.updateOne(
             {
               _id: (account as any)._id,
@@ -1886,6 +1947,7 @@ export class PropertyAccountService {
             configuredExpense = 'reversed';
             continue;
           }
+          await assertIncomeReversalPeriod(expenseKey);
           await PropertyAccount.updateOne(
             {
               _id: (account as any)._id,
@@ -2067,6 +2129,14 @@ export class PropertyAccountService {
         updatedAt: new Date()
       };
 
+      await this.assertPropertyLedgerPeriod({
+        propertyId,
+        transactionDate: expenseData.date instanceof Date ? expenseData.date : new Date(expenseData.date),
+        sourceModule: 'property_expense',
+        sourceId: idKey,
+        actorId: expenseData.processedBy
+      });
+
       // Atomic, guarded append using idempotencyKey and balance check.
       const previousLastUpdated = account.lastUpdated ? new Date(account.lastUpdated) : undefined as any;
       let res = await PropertyAccount.updateOne(
@@ -2184,6 +2254,14 @@ export class PropertyAccountService {
         createdAt: new Date(),
         updatedAt: new Date()
       };
+
+      await this.assertPropertyLedgerPeriod({
+        propertyId,
+        transactionDate: effectiveDate,
+        sourceModule: 'property_opening_balance',
+        sourceId: idKey,
+        actorId: openingBalanceData.processedBy
+      });
 
       await PropertyAccount.updateOne(
         {

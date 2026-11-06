@@ -190,6 +190,22 @@ class PropertyAccountService {
             return undefined;
         });
     }
+    assertPropertyLedgerPeriod(input) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const companyId = input.companyId || (yield this.resolveCompanyIdForEntity(input.propertyId));
+            if (!companyId) {
+                throw new errorHandler_1.AppError('This property ledger entry has no company and was not posted', 409, 'COMPANY_REQUIRED');
+            }
+            const { assertPeriodAllowsPosting } = yield Promise.resolve().then(() => __importStar(require('./accountingPeriodService')));
+            yield assertPeriodAllowsPosting({
+                companyId,
+                transactionDate: input.transactionDate,
+                actorId: input.actorId,
+                sourceModule: input.sourceModule,
+                sourceId: input.sourceId
+            });
+        });
+    }
     notifyAccountUpdated(opts) {
         void (() => __awaiter(this, void 0, void 0, function* () {
             try {
@@ -652,6 +668,14 @@ class PropertyAccountService {
                 createdAt: new Date(),
                 updatedAt: new Date()
             };
+            yield this.assertPropertyLedgerPeriod({
+                propertyId: input.propertyId,
+                companyId: input.companyId,
+                transactionDate: transaction.date,
+                sourceModule: 'property_pass_through_collection',
+                sourceId: idKey,
+                actorId: input.processedBy
+            });
             const pushed = yield this.pushPassThroughTransactionAtomic({
                 account,
                 propertyId: input.propertyId,
@@ -703,6 +727,14 @@ class PropertyAccountService {
                 createdAt: new Date(),
                 updatedAt: new Date()
             };
+            yield this.assertPropertyLedgerPeriod({
+                propertyId: input.propertyId,
+                companyId: input.companyId,
+                transactionDate: transaction.date,
+                sourceModule: 'property_pass_through_payment',
+                sourceId: idKey,
+                actorId: input.processedBy
+            });
             const pushed = yield this.pushPassThroughTransactionAtomic({
                 account,
                 propertyId: input.propertyId,
@@ -766,6 +798,13 @@ class PropertyAccountService {
                             reversed += 1;
                             continue;
                         }
+                        yield this.assertPropertyLedgerPeriod({
+                            propertyId: String(account.propertyId),
+                            transactionDate: new Date(),
+                            sourceModule: 'property_pass_through_reversal',
+                            sourceId: idKey,
+                            actorId: opts === null || opts === void 0 ? void 0 : opts.processedBy
+                        });
                         const chargeType = this.normalizePassThroughType(String((tx === null || tx === void 0 ? void 0 : tx.chargeTypeCode) || (bucket === null || bucket === void 0 ? void 0 : bucket.type) || 'OTHER'));
                         const pushed = yield this.pushPassThroughTransactionAtomic({
                             account: account,
@@ -1664,6 +1703,20 @@ class PropertyAccountService {
                 (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, `${String(payment.notes || '')} ${String((opts === null || opts === void 0 ? void 0 : opts.reason) || '')}`, 'PHASE27_FAIL_OWNER');
                 let countered = false;
                 let configuredExpense = 'absent';
+                let reversalPeriodChecked = false;
+                const assertIncomeReversalPeriod = (sourceId) => __awaiter(this, void 0, void 0, function* () {
+                    if (reversalPeriodChecked)
+                        return;
+                    yield this.assertPropertyLedgerPeriod({
+                        propertyId: String(payment.propertyId),
+                        companyId: payment.companyId ? String(payment.companyId) : undefined,
+                        transactionDate: new Date(),
+                        sourceModule: 'property_income_reversal',
+                        sourceId,
+                        actorId: opts === null || opts === void 0 ? void 0 : opts.processedBy
+                    });
+                    reversalPeriodChecked = true;
+                });
                 for (const target of targets) {
                     const account = this.validateWritableAccount(yield this.getOrCreatePropertyAccount(target.id, target.ledger), target.id, 'reverseIncomeFromPayment');
                     const originalIncome = (account.transactions || []).filter((t) => t.type === 'income' &&
@@ -1690,6 +1743,7 @@ class PropertyAccountService {
                             createdAt: new Date(),
                             updatedAt: new Date()
                         };
+                        yield assertIncomeReversalPeriod(incomeKey);
                         yield PropertyAccount_1.default.updateOne({
                             _id: account._id,
                             propertyId: account.propertyId,
@@ -1716,6 +1770,7 @@ class PropertyAccountService {
                             configuredExpense = 'reversed';
                             continue;
                         }
+                        yield assertIncomeReversalPeriod(expenseKey);
                         yield PropertyAccount_1.default.updateOne({
                             _id: account._id,
                             propertyId: account.propertyId,
@@ -1863,6 +1918,13 @@ class PropertyAccountService {
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
+                yield this.assertPropertyLedgerPeriod({
+                    propertyId,
+                    transactionDate: expenseData.date instanceof Date ? expenseData.date : new Date(expenseData.date),
+                    sourceModule: 'property_expense',
+                    sourceId: idKey,
+                    actorId: expenseData.processedBy
+                });
                 // Atomic, guarded append using idempotencyKey and balance check.
                 const previousLastUpdated = account.lastUpdated ? new Date(account.lastUpdated) : undefined;
                 let res = yield PropertyAccount_1.default.updateOne(Object.assign({ _id: account._id, propertyId: account.propertyId, isArchived: false, isActive: { $ne: false }, runningBalance: { $gte: expenseData.amount }, 'transactions.idempotencyKey': { $ne: idKey } }, (previousLastUpdated ? { lastUpdated: previousLastUpdated } : {})), {
@@ -1950,6 +2012,13 @@ class PropertyAccountService {
                     createdAt: new Date(),
                     updatedAt: new Date()
                 };
+                yield this.assertPropertyLedgerPeriod({
+                    propertyId,
+                    transactionDate: effectiveDate,
+                    sourceModule: 'property_opening_balance',
+                    sourceId: idKey,
+                    actorId: openingBalanceData.processedBy
+                });
                 yield PropertyAccount_1.default.updateOne({
                     _id: account._id,
                     propertyId: account.propertyId,

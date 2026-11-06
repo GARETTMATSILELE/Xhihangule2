@@ -692,6 +692,28 @@ function main() {
             workspaceType: 'individual',
             plan: 'INDIVIDUAL'
         });
+        for (const date of [PAYMENT_DATE, new Date()]) {
+            const bounds = (0, accountingPeriodService_1.utcMonthBounds)(date);
+            const existing = yield AccountingPeriod_1.AccountingPeriod.findOne({
+                companyId: individualCompany._id,
+                periodStart: bounds.periodStart,
+                periodEnd: bounds.periodEnd
+            }).select('_id').lean();
+            if (existing)
+                continue;
+            yield AccountingPeriod_1.AccountingPeriod.create({
+                companyId: individualCompany._id,
+                financialYear: bounds.periodStart.getUTCFullYear(),
+                period: bounds.periodStart.getUTCMonth() + 1,
+                month: bounds.periodStart.getUTCMonth() + 1,
+                periodStart: bounds.periodStart,
+                periodEnd: bounds.periodEnd,
+                startDate: bounds.periodStart,
+                endDate: bounds.periodEnd,
+                status: 'OPEN',
+                createdBy: user._id
+            });
+        }
         const individualProperty = yield Property_1.Property.create({
             companyId: individualCompany._id,
             ownerId: user._id,

@@ -33,10 +33,6 @@ const FinancialControlsPage: React.FC = () => {
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [periods, setPeriods] = useState<any[]>([]);
   const [reason, setReason] = useState('');
-  const [financialYear, setFinancialYear] = useState(String(new Date().getUTCFullYear()));
-  const [month, setMonth] = useState(String(new Date().getUTCMonth() + 1));
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [activationMessage, setActivationMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,37 +66,6 @@ const FinancialControlsPage: React.FC = () => {
       await load();
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'Integrity run failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const yearNumber = Number(financialYear);
-  const monthNumber = Number(month);
-  const previewStart = Number.isInteger(yearNumber) && monthNumber >= 1 && monthNumber <= 12
-    ? new Date(Date.UTC(yearNumber, monthNumber - 1, 1)).toISOString().slice(0, 10)
-    : '';
-  const previewEnd = Number.isInteger(yearNumber) && monthNumber >= 1 && monthNumber <= 12
-    ? new Date(Date.UTC(yearNumber, monthNumber, 0)).toISOString().slice(0, 10)
-    : '';
-
-  const openPeriod = async () => {
-    if (!confirmOpen) {
-      setError('Confirm the company, year, and month before opening a period.');
-      return;
-    }
-    try {
-      setBusy(true);
-      const result = await accountingService.createAccountingPeriod({
-        financialYear: yearNumber,
-        month: monthNumber,
-        confirmed: true
-      });
-      setActivationMessage(result?.message || (result?.alreadyExisted ? 'This period already exists.' : 'Accounting period opened.'));
-      setConfirmOpen(false);
-      await load();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Failed to open period');
     } finally {
       setBusy(false);
     }
@@ -245,35 +210,9 @@ const FinancialControlsPage: React.FC = () => {
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Typography variant="h6">Accounting periods</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Opens one period for the signed-in company. A missing period stays closed to posting until this confirmation is sent.
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 1 }}>
+          The current month opens automatically when this company records a financial transaction. Historical months are not opened automatically. A closed or soft-closed period stays closed until an accountant reopens it with a reason.
         </Typography>
-        <Grid container spacing={1} sx={{ my: 1 }}>
-          <Grid item xs={12} sm={3}>
-            <TextField fullWidth label="Financial year" value={financialYear} onChange={(e) => setFinancialYear(e.target.value)} />
-          </Grid>
-          <Grid item xs={12} sm={3}>
-            <TextField fullWidth label="Month" type="number" value={month} onChange={(e) => setMonth(e.target.value)} inputProps={{ min: 1, max: 12 }} />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <Typography variant="body2">Start {previewStart || '—'} · End {previewEnd || '—'}</Typography>
-          </Grid>
-        </Grid>
-        <Alert severity="info" sx={{ mb: 1 }}>
-          This does not open historical months by itself. Tick the confirmation, then open this month only.
-        </Alert>
-        <Button
-          variant="contained"
-          disabled={busy || !confirmOpen}
-          onClick={openPeriod}
-          sx={{ mr: 1 }}
-        >
-          Open period
-        </Button>
-        <Button variant="text" onClick={() => setConfirmOpen((value) => !value)}>
-          {confirmOpen ? 'Confirmation on' : 'Confirm this company, year, and month'}
-        </Button>
-        {activationMessage && <Alert severity="success" sx={{ mt: 1 }}>{activationMessage}</Alert>}
         <TextField
           fullWidth
           sx={{ my: 1 }}

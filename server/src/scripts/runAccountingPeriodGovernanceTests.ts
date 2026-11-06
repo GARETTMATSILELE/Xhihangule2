@@ -90,13 +90,27 @@ assert.strictEqual(variance.exceptionClass, 'HISTORICAL VARIANCE');
 assert.strictEqual(variance.readyForApproval, false);
 
 assert.ok(periodService.includes('PERIOD_NOT_ESTABLISHED'));
+assert.ok(periodService.includes('isCurrentAccountingMonth'));
+assert.ok(periodService.includes('ensureCurrentPeriodForFinancialOperation'));
+assert.ok(periodService.includes('Historical periods are not opened automatically.'));
 assert.ok(!periodService.slice(periodService.indexOf('export async function ensureCurrentOpenPeriod'), periodService.indexOf('export async function ensurePeriodIdentityIndex')).includes('AccountingPeriod.create'));
 assert.ok(repair.includes("assessment.checks.periodStatus !== 'OPEN'"));
 assert.ok(trust.includes('assertPeriodAllowsPosting'));
 assert.ok(owner.includes('assertPeriodAllowsPosting'));
+assert.ok(owner.includes("sourceModule: 'property_pass_through_collection'"));
+assert.ok(owner.includes("sourceModule: 'property_pass_through_payment'"));
+assert.ok(owner.includes("sourceModule: 'property_pass_through_reversal'"));
+assert.ok(owner.includes("sourceModule: 'property_expense'"));
+assert.ok(owner.includes("sourceModule: 'property_opening_balance'"));
+assert.ok(owner.includes("sourceModule: 'property_income_reversal'"));
+assert.ok(periodService.includes('Safe monthly rollover'));
 assert.ok(fs.readFileSync(path.join(__dirname, '../services/accountingIntegrationService.ts'), 'utf8').includes('assertPeriodAllowsPosting'));
 assert.ok(fs.readFileSync(path.join(__dirname, '../services/agentAccountService.ts'), 'utf8').includes('assertPeriodAllowsPosting'));
 assert.ok(fs.readFileSync(path.join(__dirname, '../services/companyAccountExpenseService.ts'), 'utf8').includes('assertPeriodAllowsPosting'));
 assert.ok(!controls.includes('ensureCurrentOpenPeriod'));
+assert.ok(!controls.includes('ensureCurrentPeriodForFinancialOperation'));
+const controlsPage = fs.readFileSync(path.join(__dirname, '../../../client/src/pages/AccountantDashboard/FinancialControlsPage.tsx'), 'utf8');
+assert.ok(controlsPage.includes('opens automatically'));
+assert.ok(!controlsPage.includes('Open period'));
 
 console.log('accounting period governance tests passed');

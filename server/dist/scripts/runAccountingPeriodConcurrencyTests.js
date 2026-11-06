@@ -16,6 +16,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const assert_1 = __importDefault(require("assert"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const AccountingPeriod_1 = require("../models/AccountingPeriod");
+const AccountingEventLog_1 = require("../models/AccountingEventLog");
 const roles_1 = require("../middleware/roles");
 const accountingDatePolicy_1 = require("../services/accountingDatePolicy");
 const accountingPeriodService_1 = require("../services/accountingPeriodService");
@@ -78,6 +79,7 @@ assert_1.default.strictEqual(notReady.readyForApproval, false);
 assert_1.default.strictEqual(notReady.exceptionClass, 'DEPOSIT RECONCILIATION');
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         if (DB.includes('property-manag') || DB.includes('cosmos') || DB.includes('mongocluster')) {
             console.error('Refusing to run period concurrency tests against an application database');
             process.exit(1);
@@ -143,6 +145,79 @@ function main() {
             status: 'CLOSED'
         });
         yield rejects(() => (0, accountingPeriodService_1.assertPeriodAllowsPosting)({ companyId: companyA, transactionDate: historical, sourceModule: 'trust' }), 'PERIOD_CLOSED');
+        const companyC = new mongoose_1.default.Types.ObjectId().toString();
+        const currentDate = new Date();
+        assert_1.default.strictEqual(yield (0, accountingPeriodService_1.ensureCurrentOpenPeriod)(companyC), null);
+        assert_1.default.strictEqual(yield AccountingPeriod_1.AccountingPeriod.countDocuments({ companyId: companyC }), 0);
+        const [autoA, autoB] = yield Promise.all([
+            (0, accountingPeriodService_1.assertPeriodAllowsPosting)({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment', sourceId: 'auto-a' }),
+            (0, accountingPeriodService_1.assertPeriodAllowsPosting)({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment', sourceId: 'auto-b' })
+        ]);
+        assert_1.default.strictEqual(autoA.periodStatus, 'OPEN');
+        assert_1.default.strictEqual(autoB.periodStatus, 'OPEN');
+        const automaticRows = yield AccountingPeriod_1.AccountingPeriod.find({ companyId: companyC });
+        assert_1.default.strictEqual(automaticRows.length, 1);
+        assert_1.default.strictEqual(automaticRows[0].status, 'OPEN');
+        assert_1.default.strictEqual(automaticRows[0].financialYear, currentDate.getUTCFullYear());
+        assert_1.default.strictEqual(automaticRows[0].month, currentDate.getUTCMonth() + 1);
+        const createdEvents = yield AccountingEventLog_1.AccountingEventLog.find({ companyId: companyC, eventType: 'period_created' });
+        assert_1.default.strictEqual(createdEvents.length, 1);
+        assert_1.default.strictEqual((_a = createdEvents[0].metadata) === null || _a === void 0 ? void 0 : _a.automatic, true);
+        yield rejects(() => (0, accountingPeriodService_1.assertPeriodAllowsPosting)({ companyId: companyC, transactionDate: historical, sourceModule: 'payment' }), 'PERIOD_NOT_ESTABLISHED');
+        assert_1.default.strictEqual(yield AccountingPeriod_1.AccountingPeriod.countDocuments({ companyId: companyC, financialYear: 2025 }), 0);
+        yield (0, accountingPeriodService_1.closeAccountingPeriod)({
+            companyId: companyC,
+            periodId: String(automaticRows[0]._id),
+            actorId: accountant,
+            reason: 'Soft close must still require a reason',
+            status: 'SOFT_CLOSED'
+        });
+        yield rejects(() => (0, accountingPeriodService_1.assertPeriodAllowsPosting)({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment' }), 'PERIOD_SOFT_CLOSED');
+        yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+            companyId: companyC,
+            transactionDate: currentDate,
+            sourceModule: 'payment',
+            overrideReason: 'Authorised current-month adjustment'
+        });
+        yield (0, accountingPeriodService_1.closeAccountingPeriod)({
+            companyId: companyC,
+            periodId: String(automaticRows[0]._id),
+            actorId: accountant,
+            reason: 'Closed current month must stay closed',
+            status: 'CLOSED'
+        });
+        yield rejects(() => (0, accountingPeriodService_1.assertPeriodAllowsPosting)({ companyId: companyC, transactionDate: currentDate, sourceModule: 'payment' }), 'PERIOD_CLOSED');
+        const closedCurrent = yield AccountingPeriod_1.AccountingPeriod.findById(automaticRows[0]._id);
+        assert_1.default.strictEqual(closedCurrent === null || closedCurrent === void 0 ? void 0 : closedCurrent.status, 'CLOSED');
+        const companyD = new mongoose_1.default.Types.ObjectId().toString();
+        const previousMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() - 1, 15));
+        const previous = yield (0, accountingPeriodService_1.activateAccountingPeriod)({
+            companyId: companyD,
+            financialYear: previousMonth.getUTCFullYear(),
+            month: previousMonth.getUTCMonth() + 1,
+            createdBy: accountant,
+            confirmed: true
+        });
+        yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+            companyId: companyD,
+            transactionDate: currentDate,
+            sourceModule: 'payment',
+            sourceId: 'rollover'
+        });
+        const rolled = yield AccountingPeriod_1.AccountingPeriod.find({ companyId: companyD }).sort({ periodStart: 1 });
+        assert_1.default.strictEqual(rolled.length, 2);
+        const stillOpenPrevious = rolled.find((row) => String(row._id) === String(previous.period._id));
+        const establishedCurrent = rolled.find((row) => row.financialYear === currentDate.getUTCFullYear() && row.month === currentDate.getUTCMonth() + 1);
+        assert_1.default.strictEqual(stillOpenPrevious === null || stillOpenPrevious === void 0 ? void 0 : stillOpenPrevious.status, 'OPEN');
+        assert_1.default.strictEqual(establishedCurrent === null || establishedCurrent === void 0 ? void 0 : establishedCurrent.status, 'OPEN');
+        assert_1.default.notStrictEqual(String(stillOpenPrevious === null || stillOpenPrevious === void 0 ? void 0 : stillOpenPrevious._id), String(establishedCurrent === null || establishedCurrent === void 0 ? void 0 : establishedCurrent._id));
+        yield (0, accountingPeriodService_1.assertPeriodAllowsPosting)({
+            companyId: companyD,
+            transactionDate: previousMonth,
+            sourceModule: 'payment'
+        });
+        assert_1.default.strictEqual(yield AccountingPeriod_1.AccountingPeriod.countDocuments({ companyId: companyB }), 1);
+        assert_1.default.strictEqual(yield AccountingPeriod_1.AccountingPeriod.countDocuments({ companyId: companyD, financialYear: 2020 }), 0);
         yield mongoose_1.default.disconnect();
         console.log('accounting period concurrency tests passed');
     });

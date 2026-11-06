@@ -60,6 +60,13 @@ export function assertPeriodActivationConfirmed(confirmed: unknown): void {
   }
 }
 
+export const ACCOUNTING_POSTING_RULESET = 'current-month-auto-2026-11';
+
+export function isCurrentAccountingMonth(transactionDate: Date, now = new Date()): boolean {
+  return transactionDate.getUTCFullYear() === now.getUTCFullYear()
+    && transactionDate.getUTCMonth() === now.getUTCMonth();
+}
+
 export function utcMonthBounds(date = new Date()): { periodStart: Date; periodEnd: Date } {
   const periodStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
   const periodEnd = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0, 23, 59, 59, 999));
@@ -162,6 +169,7 @@ async function insertOpenPeriod(input: {
   periodStart: Date;
   periodEnd: Date;
   createdBy?: string;
+  automatic?: boolean;
 }): Promise<PeriodActivationResult> {
   await ensurePeriodIdentityIndex();
   const sameCompany = await AccountingPeriod.find({ companyId: toId(input.companyId) })
@@ -191,9 +199,10 @@ async function insertOpenPeriod(input: {
       companyId: input.companyId,
       eventType: 'period_created',
       sourceId: String(created._id),
-      message: 'Period opened explicitly',
+      message: input.automatic ? 'Current accounting period opened automatically' : 'Period opened explicitly',
       metadata: {
         actorId: input.createdBy,
+        automatic: Boolean(input.automatic),
         financialYear: input.financialYear,
         period: input.month,
         before: null,
@@ -260,7 +269,35 @@ export async function findPeriodForDate(companyId: string, transactionDate: Date
 }
 
 /**
- * A missing period is not open. CLOSED rejects. SOFT_CLOSED requires an authorised reason.
+ * Safe monthly rollover for one company.
+ * The first financial write in the clock's current month establishes that month as OPEN.
+ * Earlier months are not created, closed, reopened, or rewritten. A dashboard read does not call this.
+ */
+export async function ensureCurrentPeriodForFinancialOperation(input: {
+  companyId: string;
+  transactionDate: Date;
+  actorId?: string;
+}): Promise<void> {
+  if (!isCurrentAccountingMonth(input.transactionDate)) return;
+  const existing = await findPeriodForDate(input.companyId, input.transactionDate);
+  if (existing) return;
+  const { periodStart, periodEnd } = utcMonthBounds(input.transactionDate);
+  const identity = calendarPeriodIdentity(periodStart, periodEnd);
+  const actorId = input.actorId && mongoose.Types.ObjectId.isValid(input.actorId) ? input.actorId : undefined;
+  await insertOpenPeriod({
+    companyId: input.companyId,
+    financialYear: identity.financialYear,
+    month: identity.period,
+    periodStart,
+    periodEnd,
+    createdBy: actorId,
+    automatic: true
+  });
+}
+
+/**
+ * A missing historical period is not open. The current month is established automatically.
+ * CLOSED rejects. SOFT_CLOSED requires an authorised reason. A closed period is never reopened here.
  */
 export async function assertPeriodAllowsPosting(input: {
   companyId: string;
@@ -270,11 +307,16 @@ export async function assertPeriodAllowsPosting(input: {
   sourceModule?: string;
   sourceId?: string;
 }): Promise<{ allowed: true; periodStatus: AccountingPeriodStatus | 'UNMANAGED' }> {
+  await ensureCurrentPeriodForFinancialOperation({
+    companyId: input.companyId,
+    transactionDate: input.transactionDate,
+    actorId: input.actorId
+  });
   const period = await findPeriodForDate(input.companyId, input.transactionDate);
   const decision = decidePeriodPosting(period?.status || null, input.overrideReason);
   if (!decision.allowed) {
     const message = decision.code === 'PERIOD_NOT_ESTABLISHED'
-      ? 'No accounting period covers this date. A missing period is not open. Create an OPEN period for this company before posting.'
+      ? 'No accounting period covers this date. Historical periods are not opened automatically.'
       : decision.code === 'PERIOD_SOFT_CLOSED'
         ? `Period ${period?.periodStart.toISOString().slice(0, 10)} is SOFT_CLOSED. An accountant override reason is required to post.`
         : `Period ${period?.periodStart.toISOString().slice(0, 10)} is CLOSED. Corrections must use a reversal plus a new posting in an open period.`;
