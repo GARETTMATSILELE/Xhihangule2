@@ -2,8 +2,15 @@ import { Request, Response, NextFunction } from 'express';
 import { PropertyOwner, IPropertyOwner } from '../models/PropertyOwner';
 import { AppError } from '../middleware/errorHandler';
 import { callerCanMutatePropertyOwner, callerCanReadPropertyOwner, propertyOwnerIdsForCaller } from '../utils/propertyAccess';
+import { hasAnyRole } from '../utils/access';
 import { JwtPayload } from '../types/auth';
 import { Property } from '../models/Property';
+import { normalizeOwnerEmail, validateNewPropertyOwner, validateOwnerContact } from '../services/propertyOwnerGuards';
+import { commitOwnerPropertyLinks, validateOwnerPropertyAssignment } from '../services/ownerPropertyLinkService';
+import { retirePropertyOwner, syncOwnerPortalProfile } from '../services/ownerRetirementService';
+
+const canManageOwners = (req: Request) =>
+  hasAnyRole(req, ['agent', 'sales', 'admin', 'accountant', 'principal', 'prea', 'system_admin']);
 
 export const createPropertyOwner = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -15,32 +22,43 @@ export const createPropertyOwner = async (req: Request, res: Response, next: Nex
       return res.status(401).json({ message: 'Company ID not found' });
     }
 
-    const { email, password, firstName, lastName, phone } = req.body;
-
-    // Validate required fields
-    if (!email || !password || !firstName || !lastName || !phone) {
-      return res.status(400).json({ message: 'All fields are required' });
+    if (!canManageOwners(req)) {
+      return res.status(403).json({ message: 'You do not have permission to manage property owners' });
     }
 
-    // Check if owner already exists
-    const existingOwner = await PropertyOwner.findOne({ email, companyId: req.user.companyId });
+    const { email, password, firstName, lastName, phone } = req.body;
+    const invalid = validateNewPropertyOwner({ email, password, firstName, lastName, phone });
+    if (invalid) return res.status(400).json({ message: invalid });
+
+    const normalizedEmail = normalizeOwnerEmail(email);
+    const existingOwner = await PropertyOwner.findOne({ email: normalizedEmail, companyId: req.user.companyId });
     if (existingOwner) {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
 
-    const ownerData = {
-      email,
-      password,
-      firstName,
-      lastName,
-      phone,
-      companyId: req.user.companyId
-    };
+    const requestedPropertyIds = Array.isArray(req.body.propertyIds)
+      ? req.body.propertyIds
+      : (Array.isArray(req.body.properties) ? req.body.properties : []);
+    const assignment = requestedPropertyIds.length
+      ? await validateOwnerPropertyAssignment(req, null, [], requestedPropertyIds)
+      : { properties: [] as string[], selectedByCaller: [] as string[], removed: [] as string[] };
 
-    const owner = new PropertyOwner(ownerData);
+    const owner = new PropertyOwner({
+      email: normalizedEmail,
+      password,
+      firstName: String(firstName).trim(),
+      lastName: String(lastName).trim(),
+      phone: String(phone).trim(),
+      companyId: req.user.companyId,
+      properties: assignment.properties,
+    });
     await owner.save();
+    if (assignment.properties.length) {
+      await commitOwnerPropertyLinks(req.user.companyId, owner._id, assignment);
+    }
     res.status(201).json(owner);
   } catch (error) {
+    if (error instanceof AppError) return res.status(error.statusCode).json({ message: error.message });
     console.error('Error creating property owner:', error);
     next(new AppError('Error creating property owner', 500));
   }
@@ -107,38 +125,69 @@ export const updatePropertyOwner = async (req: Request, res: Response, next: Nex
     }
 
     const { id } = req.params;
-    const { email, companyId: _ignoredCompanyId, ...updates } = req.body; // ignore companyId changes
+    const { email } = req.body;
 
     if (!req.user.companyId) {
       return next(new AppError('Company ID not found', 401));
     }
-    const query: any = { _id: id, companyId: req.user.companyId };
-
-    // If email is being updated, check if it's already in use
-    if (email) {
-      const existingOwner = await PropertyOwner.findOne({
-        email,
-        _id: { $ne: id },
-        companyId: req.user.companyId
-      });
-
-      if (existingOwner) {
-        return next(new AppError('Email already in use by another property owner', 400));
-      }
+    if (!canManageOwners(req)) {
+      return res.status(403).json({ message: 'You do not have permission to manage property owners' });
     }
+    const query: any = { _id: id, companyId: req.user.companyId };
 
     if (!(await callerCanMutatePropertyOwner(req, id))) {
       return next(new AppError('Property owner not found', 404));
     }
+    const existing = await PropertyOwner.findOne(query);
+    if (!existing) return next(new AppError('Property owner not found', 404));
+
+    const allowed = ['firstName', 'lastName', 'phone', 'nationalId', 'passportNumber', 'taxNumber', 'address', 'active'];
+    const scalar: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) scalar[key] = req.body[key];
+    }
+    if (email) scalar.email = normalizeOwnerEmail(email);
+    const contactError = validateOwnerContact({ email: scalar.email, phone: scalar.phone });
+    if (contactError) return res.status(400).json({ message: contactError });
+    if (scalar.email) {
+      const duplicate = await PropertyOwner.findOne({
+        email: scalar.email,
+        _id: { $ne: id },
+        companyId: req.user.companyId
+      }).select('_id');
+      if (duplicate) return next(new AppError('Email already in use by another property owner', 400));
+    }
+
+    const requestedPropertyIds = Array.isArray(req.body.properties)
+      ? req.body.properties
+      : (Array.isArray(req.body.propertyIds) ? req.body.propertyIds : null);
+    const assignment = requestedPropertyIds
+      ? await validateOwnerPropertyAssignment(
+        req,
+        id,
+        (existing.properties || []).map((propertyId) => String(propertyId)),
+        requestedPropertyIds,
+      )
+      : null;
+    if (assignment) scalar.properties = assignment.properties;
 
     const owner = await PropertyOwner.findOneAndUpdate(
       query,
-      { 
-        ...updates,
-        ...(email && { email })
-      },
+      { $set: scalar },
       { new: true, runValidators: true }
-    ).select('-password');
+    ).select('-password -tokens');
+    if (owner && assignment) {
+      await commitOwnerPropertyLinks(req.user.companyId, owner._id, assignment);
+    }
+    if (owner && (scalar.email || scalar.firstName || scalar.lastName)) {
+      await syncOwnerPortalProfile({
+        previousEmail: existing.email,
+        companyId: req.user.companyId,
+        email: typeof scalar.email === 'string' ? scalar.email : undefined,
+        firstName: typeof scalar.firstName === 'string' ? scalar.firstName : undefined,
+        lastName: typeof scalar.lastName === 'string' ? scalar.lastName : undefined,
+      });
+    }
 
     if (!owner) {
       return next(new AppError('Property owner not found', 404));
@@ -161,25 +210,14 @@ export const deletePropertyOwner = async (req: Request, res: Response, next: Nex
     if (!req.user.companyId) {
       return next(new AppError('Company ID not found', 401));
     }
+    if (!canManageOwners(req)) {
+      return res.status(403).json({ message: 'You do not have permission to manage property owners' });
+    }
     if (!(await callerCanMutatePropertyOwner(req, id))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
-    const query: any = { _id: id, companyId: req.user.companyId };
-    
-    const owner = await PropertyOwner.findOneAndDelete(query);
-    
-    if (!owner) {
-      return res.status(404).json({ message: 'Property owner not found' });
-    }
-
-    // Only log _id and email if owner is not null and has those properties
-    if (owner && (owner as any)._id && (owner as any).email) {
-      console.log('Property owner deleted successfully:', { id: (owner as any)._id, email: (owner as any).email });
-    } else {
-      console.log('Property owner deleted successfully');
-    }
-    
-    res.json({ message: 'Property owner deleted successfully' });
+    const result = await retirePropertyOwner(id, req.user.companyId);
+    res.json(result);
   } catch (error) {
     next(error instanceof AppError ? error : new AppError('Error deleting property owner', 500));
   }
@@ -195,6 +233,8 @@ export const getPropertyOwnersPublic = async (req: Request, res: Response) => {
     }
     
     let query: any = { companyId };
+    const visibleOwnerIds = await propertyOwnerIdsForCaller(req);
+    if (visibleOwnerIds !== 'company') query._id = { $in: visibleOwnerIds };
 
     // Additional filtering options
     if (req.query.email) {
@@ -211,7 +251,7 @@ export const getPropertyOwnersPublic = async (req: Request, res: Response) => {
 
     // Get property owners, excluding password field
     const owners = await PropertyOwner.find(query)
-      .select('-password')
+      .select('-password -tokens')
       .sort({ createdAt: -1 }); // Sort by newest first
 
     res.json({ 
@@ -268,42 +308,40 @@ export const createPropertyOwnerPublic = async (req: Request, res: Response) => 
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    // Validate required fields
-    if (!email || !password || !firstName || !lastName || !phone) {
-      return res.status(400).json({ message: 'All fields are required' });
+    if (!canManageOwners(req)) {
+      return res.status(403).json({ message: 'You do not have permission to manage property owners' });
     }
+    const invalid = validateNewPropertyOwner({ email, password, firstName, lastName, phone });
+    if (invalid) return res.status(400).json({ message: invalid });
 
-    // Check if owner already exists
-    const existingOwner = await PropertyOwner.findOne({ email, companyId });
+    const normalizedEmail = normalizeOwnerEmail(email);
+    const existingOwner = await PropertyOwner.findOne({ email: normalizedEmail, companyId });
     if (existingOwner) {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
 
-    const ownerData: any = {
-      email,
-      password,
-      firstName,
-      lastName,
-      phone,
-      companyId
-    };
+    const requestedPropertyIds = Array.isArray(propertyIds) ? propertyIds : [];
+    const assignment = requestedPropertyIds.length
+      ? await validateOwnerPropertyAssignment(req, null, [], requestedPropertyIds)
+      : { properties: [] as string[], selectedByCaller: [] as string[], removed: [] as string[] };
 
-    // If propertyIds are provided, assign them to the owner
-    if (Array.isArray(propertyIds) && propertyIds.length > 0) {
-      ownerData.properties = propertyIds;
+    const owner = new PropertyOwner({
+      email: normalizedEmail,
+      password,
+      firstName: String(firstName).trim(),
+      lastName: String(lastName).trim(),
+      phone: String(phone).trim(),
+      companyId,
+      properties: assignment.properties,
+    });
+    await owner.save();
+    if (assignment.properties.length) {
+      await commitOwnerPropertyLinks(companyId, owner._id, assignment);
     }
 
-    const owner = new PropertyOwner(ownerData);
-    await owner.save();
-
-    // Do not modify Property.ownerId here; maintain linkage via PropertyOwner.properties only.
-    
-    // Return owner without password
-    const ownerResponse = owner.toObject();
-    delete (ownerResponse as Partial<typeof ownerResponse>).password;
-    
-    res.status(201).json(ownerResponse);
+    res.status(201).json(owner.toObject());
   } catch (error) {
+    if (error instanceof AppError) return res.status(error.statusCode).json({ message: error.message });
     console.error('Error creating property owner (public):', error);
     res.status(500).json({ message: 'Error creating property owner' });
   }
@@ -313,46 +351,18 @@ export const createPropertyOwnerPublic = async (req: Request, res: Response) => 
 export const updatePropertyOwnerPublic = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { email, properties, password, ...updates } = req.body;
     const companyId = req.user?.companyId;
     if (!companyId) {
       return res.status(401).json({ message: 'Authentication required' });
     }
-
-    let query: any = { _id: id, companyId };
-
-    // If email is being updated, check if it's already in use
-    if (email) {
-      const existingOwner = await PropertyOwner.findOne({
-        email,
-        _id: { $ne: id },
-        ...(companyId && { companyId })
-      });
-      if (existingOwner) {
-        return res.status(400).json({ message: 'Email already in use by another property owner' });
-      }
-    }
-
-    // Build update object, only include password if it's not empty
-    const updateObject: any = { ...updates };
-    if (email) updateObject.email = email;
-    if (properties) updateObject.properties = properties;
-    if (password && password.trim() !== '') updateObject.password = password;
-
-    // Update the owner
-    const owner = await PropertyOwner.findOneAndUpdate(
-      query,
-      updateObject,
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    if (!owner) {
+    if (!canManageOwners(req) || !(await callerCanMutatePropertyOwner(req, id))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
-
-    // Do not modify Property.ownerId on public updates; linkage is via PropertyOwner.properties.
-
-    res.json(owner);
+    req.body.properties = req.body.properties || req.body.propertyIds;
+    return updatePropertyOwner(req, res, (error) => {
+      const status = error instanceof AppError ? error.statusCode : 500;
+      res.status(status).json({ message: error instanceof Error ? error.message : 'Error updating property owner' });
+    });
   } catch (error) {
     console.error('Error updating property owner (public):', error);
     res.status(500).json({ message: 'Error updating property owner' });
@@ -370,20 +380,12 @@ export const deletePropertyOwnerPublic = async (req: Request, res: Response) => 
 
     let query: any = { _id: id, companyId };
 
-    const owner = await PropertyOwner.findOneAndDelete(query);
-    
-    if (!owner) {
+    if (!canManageOwners(req) || !(await callerCanMutatePropertyOwner(req, id))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    // Only log _id and email if owner is not null and has those properties
-    if (owner && (owner as any)._id && (owner as any).email) {
-      console.log('Property owner deleted successfully:', { id: (owner as any)._id, email: (owner as any).email });
-    } else {
-      console.log('Property owner deleted successfully');
-    }
-
-    res.json({ message: 'Property owner deleted successfully' });
+    const result = await retirePropertyOwner(id, companyId);
+    res.json(result);
   } catch (error) {
     console.error('Error deleting property owner (public):', error);
     res.status(500).json({ message: 'Error deleting property owner' });

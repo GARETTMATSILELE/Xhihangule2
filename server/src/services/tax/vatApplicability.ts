@@ -4,6 +4,7 @@ export type CompanyVatRegistration = {
   vatRegistered: boolean;
   vatRegistrationEffectiveDate?: Date | string | null;
   vatRegistrationCancelledAt?: Date | string | null;
+  vatCategory?: string | null;
 };
 
 export type VatApplicabilityInput = {

@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { createWebPayment, createMobilePayment, pollTransaction, handleResult, handleReturn, getStatus, confirmByReference } from '../controllers/paynowController';
 import { authWithCompany } from '../middleware/auth';
+import { startPaynowRecoveryJob } from '../services/paynowRecoveryService';
+
+startPaynowRecoveryJob();
 
 const router = Router();
 

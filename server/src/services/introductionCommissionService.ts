@@ -6,8 +6,10 @@
  */
 import mongoose from 'mongoose';
 import { Payment } from '../models/Payment';
+import { Property } from '../models/Property';
 import { CommissionService, applyLevyPassThroughToSnapshot } from './commissionService';
 import { calculatePropertyCommission, type PropertyCommissionResult } from './propertyCommissionCalculator';
+import { resolveStoredCommissionPercentage } from './commissionRateResolution';
 import { roundMoney } from '../utils/money';
 import {
   introductionTargetFromLease,
@@ -160,6 +162,7 @@ export async function loadIntroductionConsumedRent(input: {
 export function snapshotFromIntroductionAllocation(
   allocation: IntroductionAllocation,
   vat: {
+    commissionPercentage?: number;
     vatOnCommission?: boolean;
     vatTreatment?: 'inclusive' | 'exclusive' | null;
     vatRate?: number;
@@ -168,10 +171,16 @@ export function snapshotFromIntroductionAllocation(
     agencyPercentOfRemaining?: number;
   } = {}
 ): PropertyCommissionResult {
+  const resolved = allocation.introThisPayment > 0
+    ? resolveStoredCommissionPercentage(vat.commissionPercentage)
+    : { ok: true as const, percent: 0 };
+  if (!resolved.ok) {
+    throw new Error(resolved.message);
+  }
   return calculatePropertyCommission({
     grossRent: allocation.introThisPayment,
     levy: 0,
-    commissionPercentage: allocation.introThisPayment > 0 ? 100 : 0,
+    commissionPercentage: resolved.percent,
     vatOnCommission: Boolean(vat.vatOnCommission),
     vatTreatment: vat.vatTreatment,
     vatRate: vat.vatRate,
@@ -191,7 +200,9 @@ export function applyIntroductionOwnerRemainder(
     allocation.introThisPayment + allocation.ownerRent,
     allocation.levyAllocated
   );
-  snapshot.ownerAmount = roundMoney(allocation.ownerRent + allocation.levyAllocated);
+  snapshot.ownerAmount = roundMoney(
+    Number(result.ownerAmount || 0) + allocation.ownerRent + allocation.levyAllocated
+  );
   return snapshot;
 }
 
@@ -203,6 +214,7 @@ export async function buildIntroductionRentalCommission(input: {
   rentAllocated: number;
   levyAllocated?: number;
   oneMonthRent: number;
+  commissionPercentage: number;
   vatOnCommission?: boolean;
   vatTreatment?: 'inclusive' | 'exclusive' | null;
   vatRate?: number;
@@ -224,7 +236,7 @@ export async function buildIntroductionRentalCommission(input: {
     companyId: input.companyId,
     grossRent: allocation.introThisPayment,
     levy: 0,
-    commissionPercentage: allocation.introThisPayment > 0 ? 100 : 0,
+    commissionPercentage: input.commissionPercentage,
     vatOnCommission: input.vatOnCommission,
     vatTreatment: input.vatTreatment,
     vatRate: input.vatRate,
@@ -242,6 +254,7 @@ export async function prepareIntroductionRentalCommission(input: {
   leaseId?: unknown;
   rentAllocated: number;
   levyAllocated?: number;
+  commissionPercentage?: unknown;
   vatOnCommission?: boolean;
   vatTreatment?: 'inclusive' | 'exclusive' | null;
   vatRate?: number;
@@ -250,6 +263,7 @@ export async function prepareIntroductionRentalCommission(input: {
   propertyRent?: number;
   rentUsed?: number;
 }): Promise<
+  | { ok: false; code: 'COMMISSION_RATE_REQUIRED'; message: string; missing: string[] }
   | { ok: true; context: IntroductionContextOk; allocation: IntroductionAllocation; snapshot: ReturnType<typeof applyLevyPassThroughToSnapshot>; result: PropertyCommissionResult; oneMonthRent: number }
   | IntroductionContextError
   | { ok: false; code: 'INTRODUCTION_RENT_UNDETERMINED'; message: string; missing: string[] }
@@ -269,6 +283,17 @@ export async function prepareIntroductionRentalCommission(input: {
       missing: ['lease.rentAmount']
     };
   }
+  let commissionPercentage = 0;
+  if (Number(input.rentAllocated || 0) > 0) {
+    const stored = input.commissionPercentage !== undefined
+      ? input.commissionPercentage
+      : (await Property.findById(context.propertyId).select('commission').lean() as { commission?: unknown } | null)?.commission;
+    const resolved = resolveStoredCommissionPercentage(stored);
+    if (!resolved.ok) {
+      return { ok: false, code: resolved.code, message: resolved.message, missing: ['property.commission'] };
+    }
+    commissionPercentage = resolved.percent;
+  }
   const built = await buildIntroductionRentalCommission({
     companyId: input.companyId,
     propertyId: context.propertyId,
@@ -276,6 +301,7 @@ export async function prepareIntroductionRentalCommission(input: {
     leaseId: context.leaseId,
     rentAllocated: input.rentAllocated,
     levyAllocated: input.levyAllocated,
+    commissionPercentage,
     oneMonthRent,
     vatOnCommission: input.vatOnCommission,
     vatTreatment: input.vatTreatment,

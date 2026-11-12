@@ -73,6 +73,19 @@ const propertyOwnerSchema = new Schema({
   timestamps: true
 });
 
+function stripOwnerSecrets(_doc: unknown, ret: Record<string, unknown>) {
+  delete ret.password;
+  delete ret.tokens;
+  return ret;
+}
+
+propertyOwnerSchema.set('toJSON', { transform: stripOwnerSecrets });
+propertyOwnerSchema.set('toObject', { transform: stripOwnerSecrets });
+
+// Declared for deployments that enable autoIndex. This application keeps
+// autoIndex off, so the index is created by scripts/ensureOwnerEmailIndex.ts.
+propertyOwnerSchema.index({ companyId: 1, email: 1 }, { unique: true, name: 'company_email_unique' });
+
 // Hash password before saving
 propertyOwnerSchema.pre('save', async function(next) {
   const owner = this;

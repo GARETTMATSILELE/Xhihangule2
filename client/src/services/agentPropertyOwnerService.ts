@@ -1,5 +1,11 @@
 import api from '../api';
 
+function apiMessage(error: any, fallback: string): Error {
+  const message = error?.response?.data?.message;
+  if (typeof message === 'string' && message.trim()) return new Error(message);
+  return new Error(fallback);
+}
+
 export interface PropertyOwner {
   _id: string;
   firstName: string;
@@ -26,7 +32,7 @@ export const useAgentPropertyOwnerService = () => {
       return { owners: response.data.owners || response.data };
     } catch (error: any) {
       console.error('Error fetching agent property owners:', error);
-      throw new Error('Failed to fetch property owners');
+      throw apiMessage(error, 'Failed to fetch property owners');
     }
   };
 
@@ -36,7 +42,7 @@ export const useAgentPropertyOwnerService = () => {
       return response.data;
     } catch (error: any) {
       console.error('Error fetching agent property owner:', error);
-      throw new Error('Failed to fetch property owner details');
+      throw apiMessage(error, 'Failed to fetch property owner details');
     }
   };
 
@@ -46,7 +52,7 @@ export const useAgentPropertyOwnerService = () => {
       return response.data;
     } catch (error: any) {
       console.error('Error creating agent property owner:', error);
-      throw new Error('Failed to create property owner');
+      throw apiMessage(error, 'Failed to create property owner');
     }
   };
 
@@ -56,16 +62,17 @@ export const useAgentPropertyOwnerService = () => {
       return response.data;
     } catch (error: any) {
       console.error('Error updating agent property owner:', error);
-      throw new Error('Failed to update property owner');
+      throw apiMessage(error, 'Failed to update property owner');
     }
   };
 
   const remove = async (id: string) => {
     try {
-      await api.delete(`/agents/property-owners/${id}`);
+      const response = await api.delete(`/agents/property-owners/${id}`);
+      return response.data;
     } catch (error: any) {
       console.error('Error deleting agent property owner:', error);
-      throw new Error('Failed to delete property owner');
+      throw apiMessage(error, 'Failed to delete property owner');
     }
   };
 

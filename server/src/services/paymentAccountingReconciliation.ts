@@ -409,6 +409,27 @@ export async function applyReconciliationOutcome(
       };
       lastError = obligationGap;
     }
+    const priorMissing = Array.isArray((payment as any)?.accountingMissing)
+      ? (payment as any).accountingMissing.map((item: unknown) => String(item))
+      : [];
+    const storedOwner = Number((payment as any)?.commissionDetails?.ownerAmount || 0);
+    if (payment && effective.accountingComplete && (payment as any).accountingComplete === false && storedOwner <= 0) {
+      const openOwnerException = priorMissing.includes('ownerIncome') || Boolean(await AccountingException.exists({
+        paymentId: payment._id,
+        status: 'open',
+        kind: 'incomplete_projection',
+        component: 'ownerIncome'
+      }));
+      if (openOwnerException) {
+        effective = {
+          ...effective,
+          status: 'incomplete',
+          accountingComplete: false,
+          missing: Array.from(new Set([...(effective.missing || []), 'ownerIncome']))
+        };
+        lastError = lastError || 'Stored incomplete accounting flag retained. A zero owner-income classification does not clear a historical exception.';
+      }
+    }
   }
   const persisted = await persistAccountingIntegrityFromRecon(paymentId, effective, { ...extra, lastError });
   if (effective.accountingComplete) {
@@ -540,6 +561,8 @@ export type RepairPaymentAccountingOptions = {
   userId?: string;
   reason?: string;
   dryRun?: boolean;
+  /** Separate from the repair reason. A journal repair must not imply this. */
+  approveHistoricalVatObligation?: boolean;
 };
 
 export type RepairPaymentAccountingResult = {
@@ -552,6 +575,8 @@ export type RepairPaymentAccountingResult = {
   componentsSkipped: AccountingComponent[];
   requiresManualReview: AccountingComponent[];
   recoveryAssessment: ControlledRecoveryAssessment;
+  vatObligationSkipped?: string;
+  historicalVatReview?: string;
 };
 
 export async function recoveryAssessmentForPayment(
@@ -676,7 +701,10 @@ export async function repairPaymentAccounting(
   let postResult: { errors?: string[] } = { errors: [] };
   let depositResult: 'inserted' | 'existing' | 'skipped' = 'skipped';
   if (plan.wouldCreate.length > 0) {
-    postResult = await postPaymentAccounting(paymentId, { createdBy: opts?.createdBy || opts?.userId });
+    postResult = await postPaymentAccounting(paymentId, {
+      createdBy: opts?.createdBy || opts?.userId,
+      approveHistoricalVatObligation: opts?.approveHistoricalVatObligation === true
+    });
     const paymentDoc = await Payment.findById(paymentId);
     if (paymentDoc && plan.wouldCreate.includes('deposit')) {
       try {
@@ -734,7 +762,11 @@ export async function repairPaymentAccounting(
     componentsCreated: created,
     componentsSkipped: plan.wouldNotModify,
     requiresManualReview: finalPlan.requiresManualReview,
-    recoveryAssessment
+    recoveryAssessment,
+    vatObligationSkipped: (postResult as { vatObligationSkipped?: string }).vatObligationSkipped,
+    historicalVatReview: (postResult as { reason?: string }).reason === 'HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED'
+      ? ((postResult as { vatObligationSkipped?: string }).vatObligationSkipped || (postResult as { reason?: string }).reason)
+      : undefined
   };
 }
 

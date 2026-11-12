@@ -11,6 +11,7 @@ export type CanonicalTaxLine = {
 export type CanonicalPropertyBalance = {
   propertyId: string;
   propertyName: string;
+  propertyAddress?: string;
   recognised: number;
   paid: number;
   reversed: number;
@@ -132,7 +133,7 @@ export function buildUnifiedTaxAccounts(input: {
       byProperty.set(property.propertyId, {
         propertyId: property.propertyId,
         propertyName: property.propertyName,
-        propertyAddress: '',
+        propertyAddress: property.propertyAddress || '',
         recognised: round(property.recognised),
         paid: round(property.paid),
         reversed: round(property.reversed),
@@ -153,7 +154,7 @@ export function buildUnifiedTaxAccounts(input: {
       const trustOutstanding = round(ledger.closingBalance);
       if (existing) {
         existing.propertyName = existing.propertyName || ledger.propertyName || ledger.propertyId;
-        existing.propertyAddress = ledger.propertyAddress || '';
+        existing.propertyAddress = existing.propertyAddress || ledger.propertyAddress || '';
         existing.trustOutstanding = trustOutstanding;
         existing.trustDebit = round(ledger.totalDebit);
         existing.trustCredit = round(ledger.totalCredit);

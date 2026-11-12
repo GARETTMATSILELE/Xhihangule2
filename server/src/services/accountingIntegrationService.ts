@@ -22,6 +22,7 @@ import { JournalLine } from '../models/JournalLine';
 import { ChartOfAccount } from '../models/ChartOfAccount';
 import { throwOnceIfArmed } from './testFailureSeam';
 import { logger } from '../utils/logger';
+import { assessVatPayableJournal, authoritativeSnapshotVatRate, HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED } from './vatPolicyService';
 import { classifyOperationalFailure, ExpenseSyncError } from './operationalFailure';
 import { resolveFinancialReview, upsertFinancialReview } from './financialOperationVisibility';
 import {
@@ -85,6 +86,7 @@ async function ensureJournal(
 export type ReceiptJournalPostResult = {
   receiptJournal: 'posted' | 'skipped';
   reason?: string;
+  vatObligationSkipped?: string;
 };
 
 async function assertReceiptReferenceOwnedByPayment(
@@ -125,7 +127,7 @@ class AccountingIntegrationService {
           $setOnInsert: {
             vatCollected: totalVatCollected,
             vatPaid: 0,
-            vatRate: Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0),
+            vatRate: authoritativeSnapshotVatRate(payment),
             filingPeriod: filingPeriodFromDate(payment.paymentDate),
             status: 'pending'
           }
@@ -138,7 +140,10 @@ class AccountingIntegrationService {
     }
   }
 
-  private async ensurePaymentVatObligations(payment: IPayment, opts?: { createdBy?: string }): Promise<void> {
+  private async ensurePaymentVatObligations(
+    payment: IPayment,
+    opts?: { createdBy?: string; allowCommissionVatObligation?: boolean }
+  ): Promise<void> {
     const companyId = String(payment.companyId);
     const paymentId = String(payment._id);
     const vatOnCommission = toMoney((payment.commissionDetails as any)?.vatOnCommission || 0);
@@ -146,11 +151,11 @@ class AccountingIntegrationService {
     const commissionNet = toMoney(
       Number((payment.commissionDetails as any)?.commissionNet || (payment.commissionDetails as any)?.totalCommission || 0)
     );
-    const effectiveVatRate = Number((payment as any)?.vatOnCommissionRate || (payment.commissionDetails as any)?.vatRate || (payment as any)?.vatRate || 0);
+    const effectiveVatRate = authoritativeSnapshotVatRate(payment);
     const propertyId = (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined;
     const period = taxFilingPeriod(payment.paymentDate);
     const details = (payment.commissionDetails || {}) as any;
-    if (vatOnCommission > 0) {
+    if (vatOnCommission > 0 && opts?.allowCommissionVatObligation !== false) {
       throwOnceIfArmed(paymentId, String((payment as any).notes || ''), 'PHASE_FAIL_OBLIGATION_ONCE');
       if (
         process.env.NODE_ENV !== 'production' &&
@@ -299,7 +304,10 @@ class AccountingIntegrationService {
     }
   }
 
-  async syncPaymentReceived(payment: IPayment, opts?: { createdBy?: string }): Promise<ReceiptJournalPostResult> {
+  async syncPaymentReceived(
+    payment: IPayment,
+    opts?: { createdBy?: string; approveHistoricalVatObligation?: boolean }
+  ): Promise<ReceiptJournalPostResult> {
     const companyId = String(payment.companyId);
     const paymentId = String(payment._id);
     try {
@@ -322,7 +330,22 @@ class AccountingIntegrationService {
       const commissionNet = toMoney(
         Number((payment.commissionDetails as any)?.commissionNet || (payment.commissionDetails as any)?.totalCommission || 0)
       );
-      const effectiveVatRate = Number((payment as any)?.vatOnCommissionRate || (payment as any)?.vatRate || 0);
+      const commissionVatDecision = vatOnCommission > 0
+        ? await assessVatPayableJournal({
+            payment,
+            approveHistoricalVatObligation: opts?.approveHistoricalVatObligation === true
+          })
+        : { recognise: false, reason: 'no_commission_vat', amount: 0, rate: 0 };
+      const allowCommissionVat = commissionVatDecision.recognise;
+      if (vatOnCommission > 0 && !allowCommissionVat) {
+        return {
+          receiptJournal: 'skipped',
+          reason: HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED,
+          vatObligationSkipped: commissionVatDecision.reason
+        };
+      }
+      const effectiveVatRate = allowCommissionVat ? commissionVatDecision.rate : authoritativeSnapshotVatRate(payment);
+      const recognisedVat = allowCommissionVat ? commissionVatDecision.amount : 0;
       const propertyId = (payment as any)?.propertyId ? String((payment as any).propertyId) : undefined;
       const agentId = (payment as any)?.agentId ? String((payment as any).agentId) : undefined;
       const levyAmount = toMoney(
@@ -342,7 +365,7 @@ class AccountingIntegrationService {
         amount,
         ownerAmount: allocation.ownerPayable,
         commissionNet: allocation.commissionNet,
-        vatAmount: totalVatCollected,
+        vatAmount: vatOnCommission > 0 ? recognisedVat : paymentVat,
         levyAmount: domainPaymentType === 'sale' ? 0 : allocation.levyPayable,
         propertyId,
         agentId
@@ -357,6 +380,10 @@ class AccountingIntegrationService {
         throw new Error(`Journal is unbalanced. debit=${debit}, credit=${credit}`);
       }
       await assertReceiptReferenceOwnedByPayment(companyObjectId, receiptReference, paymentId);
+      const existingVatRecord = await VatRecord.findOne({
+        companyId: companyObjectId,
+        transactionId: paymentId
+      }).select('_id').lean();
       if (amount > 0 && receiptJournal.lines.length > 0) {
         await ensureJournal(
           {
@@ -375,24 +402,37 @@ class AccountingIntegrationService {
             createdBy: opts?.createdBy,
             lines: receiptJournal.lines,
             seamHaystack: String((payment as any).notes || ''),
-            vat: totalVatCollected > 0
+            vat: !existingVatRecord && allowCommissionVat && recognisedVat > 0
               ? {
                   sourceType: payment.paymentType,
-                  vatCollected: totalVatCollected,
+                  vatCollected: recognisedVat,
                   vatRate: effectiveVatRate,
                   filingPeriod: filingPeriodFromDate(payment.paymentDate),
                   status: 'pending'
                 }
-              : undefined
+              : !existingVatRecord && paymentVat > 0 && vatOnCommission <= 0
+                ? {
+                    sourceType: payment.paymentType,
+                    vatCollected: paymentVat,
+                    vatRate: Number((payment as any)?.vatRate || 0),
+                    filingPeriod: filingPeriodFromDate(payment.paymentDate),
+                    status: 'pending'
+                  }
+                : undefined
           })
         );
       }
 
-      if (totalVatCollected > 0) {
+      if (allowCommissionVat && vatOnCommission > 0) {
+        await this.upsertPaymentVatRecord(payment);
+      } else if (paymentVat > 0 && vatOnCommission <= 0) {
         await this.upsertPaymentVatRecord(payment);
       }
 
-      await this.ensurePaymentVatObligations(payment, opts);
+      await this.ensurePaymentVatObligations(payment, {
+        createdBy: opts?.createdBy,
+        allowCommissionVatObligation: allowCommissionVat
+      });
 
       const agentShare = toMoney((payment.commissionDetails as any)?.agentShare || 0);
       if (agentShare > 0) {
@@ -424,7 +464,10 @@ class AccountingIntegrationService {
           })
         );
       }
-      return { receiptJournal: 'posted' };
+      return {
+        receiptJournal: 'posted',
+        vatObligationSkipped: vatOnCommission > 0 && !allowCommissionVat ? commissionVatDecision.reason : undefined
+      };
     } catch (error: any) {
       const failureClass = classifyOperationalFailure(error);
       logger.warn('payment_accounting_sync_failed', {

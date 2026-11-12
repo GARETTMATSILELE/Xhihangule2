@@ -27,9 +27,11 @@ export async function resolveOwnerPropertyIds(ownerId: string, companyId: string
   const oid = owner._id as mongoose.Types.ObjectId;
 
   const fromOwnerArray = (owner.properties || []).map((p) => new mongoose.Types.ObjectId(String(p)));
+  // Property.ownerId is the managing agent (User), not the landlord.
+  // Matching it here would treat an agent id as a PropertyOwner id.
   const fromPropertyOwnerId = await Property.find({
     companyId: cid,
-    $or: [{ ownerId: oid }, { propertyOwnerId: oid }],
+    propertyOwnerId: oid,
     isDeleted: { $ne: true },
   }).select('_id');
 
@@ -40,15 +42,41 @@ export async function resolveOwnerPropertyIds(ownerId: string, companyId: string
   return Array.from(idSet).map((id) => new mongoose.Types.ObjectId(id));
 }
 
-export async function getOwnersDashboard(companyId: string) {
+function propertiesForOwner(owner: { _id: unknown; properties?: unknown[] }, properties: any[]): any[] {
+  const wanted = new Set((owner.properties || []).map((id) => String(id)));
+  const ownerId = String(owner._id);
+  return properties.filter((property) =>
+    wanted.has(String(property._id))
+    || String(property.propertyOwnerId || '') === ownerId
+  );
+}
+
+function restrictProperties<T extends { _id: unknown }>(properties: T[], visiblePropertyIds?: string[]): T[] {
+  if (!visiblePropertyIds) return properties;
+  const allowed = new Set(visiblePropertyIds.map(String));
+  return properties.filter((property) => allowed.has(String(property._id)));
+}
+
+function limitToOwnerIds<T extends { _id: unknown }>(owners: T[], ownerIds?: string[]): T[] {
+  if (!ownerIds) return owners;
+  const allowed = new Set(ownerIds.map(String));
+  return owners.filter((owner) => allowed.has(String(owner._id)));
+}
+
+export async function getOwnersDashboard(companyId: string, ownerIds?: string[], visiblePropertyIds?: string[]) {
   const cid = new mongoose.Types.ObjectId(companyId);
-  const owners = await PropertyOwner.find({ companyId: cid }).select('-password').lean();
-  const properties = await Property.find({ companyId: cid, isDeleted: { $ne: true } }).lean();
+  const owners = limitToOwnerIds(
+    await PropertyOwner.find({ companyId: cid }).select('-password -tokens').lean(),
+    ownerIds,
+  );
+  const properties = await Property.find({ companyId: cid, isDeleted: { $ne: true } })
+    .select('_id status occupiedUnits rent currentArrears propertyOwnerId')
+    .lean();
 
   const ownerPropertyIds = new Set<string>();
   for (const owner of owners) {
-    const ids = await resolveOwnerPropertyIds(String(owner._id), companyId);
-    ids.forEach((id) => ownerPropertyIds.add(String(id)));
+    restrictProperties(propertiesForOwner(owner, properties), visiblePropertyIds)
+      .forEach((property) => ownerPropertyIds.add(String(property._id)));
   }
 
   const ownerProps = properties.filter((p) => ownerPropertyIds.has(String(p._id)));
@@ -56,17 +84,24 @@ export async function getOwnersDashboard(companyId: string) {
   const vacant = Math.max(0, ownerProps.length - occupied);
 
   const propertyIds = ownerProps.map((p) => p._id);
-  const maintenancePending = await MaintenanceRequest.countDocuments({
-    companyId: cid,
-    propertyId: { $in: propertyIds },
-    status: { $in: APPROVAL_STATUSES },
-  });
+  const approvalRows = propertyIds.length
+    ? await MaintenanceRequest.find({
+      companyId: cid,
+      propertyId: { $in: propertyIds },
+      status: { $in: APPROVAL_STATUSES },
+    }).select('propertyId').lean()
+    : [];
+  const approvalPropertyIds = new Set(approvalRows.map((row) => String(row.propertyId)));
+  const ownersAwaitingApproval = owners.filter((owner) =>
+    restrictProperties(propertiesForOwner(owner, ownerProps), visiblePropertyIds)
+      .some((property) => approvalPropertyIds.has(String(property._id)))
+  ).length;
 
   const outstandingBalance = ownerProps.reduce((s, p) => s + Number(p.currentArrears || 0), 0);
-  const ownersWithBalance = owners.filter((o) => {
-    const props = ownerProps.filter((p) => String(p.ownerId) === String(o._id) || (o.properties || []).some((pid: any) => String(pid) === String(p._id)));
-    return props.some((p) => Number(p.currentArrears || 0) > 0);
-  }).length;
+  const ownersWithBalance = owners.filter((owner) =>
+    restrictProperties(propertiesForOwner(owner, ownerProps), visiblePropertyIds)
+      .some((property) => Number(property.currentArrears || 0) > 0)
+  ).length;
 
   return {
     kpis: {
@@ -74,37 +109,39 @@ export async function getOwnersDashboard(companyId: string) {
       totalProperties: ownerProps.length,
       occupiedProperties: occupied,
       vacantProperties: vacant,
-      ownersAwaitingApproval: maintenancePending,
+      ownersAwaitingApproval,
       ownersWithOutstandingBalances: ownersWithBalance,
       totalOutstandingBalance: outstandingBalance,
     },
   };
 }
 
-export async function getOwnerListSummaries(companyId: string) {
+export async function getOwnerListSummaries(companyId: string, ownerIds?: string[], visiblePropertyIds?: string[]) {
   const cid = new mongoose.Types.ObjectId(companyId);
-  const owners = await PropertyOwner.find({ companyId: cid }).select('-password').lean();
-  const allProperties = await Property.find({ companyId: cid, isDeleted: { $ne: true } }).lean();
-  const allMaintenance = await MaintenanceRequest.find({ companyId: cid }).lean();
+  const owners = limitToOwnerIds(
+    await PropertyOwner.find({ companyId: cid }).select('-password -tokens').lean(),
+    ownerIds,
+  );
+  const allProperties = await Property.find({ companyId: cid, isDeleted: { $ne: true } })
+    .select('_id status occupiedUnits rent currentArrears propertyOwnerId')
+    .lean();
+  const allMaintenance = await MaintenanceRequest.find({ companyId: cid }).select('propertyId status lastActivityAt updatedAt createdAt').lean();
+  const leaseRows = await Lease.find({
+    companyId: cid,
+    status: 'active',
+    propertyId: { $in: allProperties.map((property) => property._id) },
+  }).select('propertyId rentAmount').lean();
+  const leaseRent = new Map(leaseRows.map((lease) => [String(lease.propertyId), Number(lease.rentAmount || 0)]));
 
-  return Promise.all(
-    owners.map(async (owner) => {
-      const propertyIds = await resolveOwnerPropertyIds(String(owner._id), companyId);
-      const props = allProperties.filter((p) => propertyIds.some((id) => String(id) === String(p._id)));
-      const occupiedCount = props.filter((p) => p.status === 'rented').length;
+  return owners.map((owner) => {
+      const props = restrictProperties(propertiesForOwner(owner, allProperties), visiblePropertyIds);
+      const propertyIds = props.map((property) => property._id);
+      const occupiedCount = props.filter((p) => p.status === 'rented' || (p.occupiedUnits && p.occupiedUnits > 0)).length;
       const vacantCount = Math.max(0, props.length - occupiedCount);
-      const snapshots = await getPropertyFinancialSnapshots(propertyIds, companyId);
-      const snapList = props
-        .map((p) => snapshots.get(String(p._id)))
-        .filter((s): s is NonNullable<typeof s> => !!s);
-      const totals = snapList.length
-        ? aggregateOwnerLedgerTotals(snapList)
-        : {
-            monthlyRevenue: props.reduce((s, p) => s + Number(p.rent || 0), 0),
-            tenantArrears: props.reduce((s, p) => s + Number(p.currentArrears || 0), 0),
-          };
-      const monthlyRevenue = totals.monthlyRevenue;
-      const outstandingBalance = totals.tenantArrears;
+      // List rent and arrears use the same stored property and active-lease fields
+      // as the ledger snapshot. Opening this list does not read or create ledgers.
+      const monthlyRevenue = props.reduce((sum, property) => sum + Number(property.rent || leaseRent.get(String(property._id)) || 0), 0);
+      const outstandingBalance = props.reduce((sum, property) => sum + Number(property.currentArrears || 0), 0);
       const maint = allMaintenance.filter((m) => propertyIds.some((pid) => String(pid) === String(m.propertyId)));
       const pendingMaintenanceCount = maint.filter((m) =>
         OPEN_STATUSES.includes(normalizeMaintenanceStatus(m.status)) &&
@@ -131,16 +168,17 @@ export async function getOwnerListSummaries(companyId: string) {
         outstandingBalance,
         pendingMaintenanceCount,
         lastActivity: new Date(lastActivity).toISOString(),
+        createdAt: owner.createdAt ? new Date(owner.createdAt).toISOString() : undefined,
       };
-    })
-  );
+  });
 }
 
-export async function getOwnerPortfolio(ownerId: string, companyId: string) {
-  const owner = await PropertyOwner.findOne({ _id: ownerId, companyId }).select('-password');
+export async function getOwnerPortfolio(ownerId: string, companyId: string, visiblePropertyIds?: string[]) {
+  const owner = await PropertyOwner.findOne({ _id: ownerId, companyId }).select('-password -tokens');
   if (!owner) throw new AppError('Property owner not found', 404);
 
-  const propertyIds = await resolveOwnerPropertyIds(ownerId, companyId);
+  const propertyIds = (await resolveOwnerPropertyIds(ownerId, companyId))
+    .filter((id) => !visiblePropertyIds || visiblePropertyIds.includes(String(id)));
   const properties = await Property.find({ _id: { $in: propertyIds }, companyId }).lean();
   const leases = await Lease.find({ propertyId: { $in: propertyIds }, companyId, status: 'active' })
     .populate('tenantId', 'firstName lastName email')
@@ -194,8 +232,9 @@ export async function getOwnerPortfolio(ownerId: string, companyId: string) {
   };
 }
 
-export async function getOwnerFinancials(ownerId: string, companyId: string) {
-  const propertyIds = await resolveOwnerPropertyIds(ownerId, companyId);
+export async function getOwnerFinancials(ownerId: string, companyId: string, visiblePropertyIds?: string[]) {
+  const propertyIds = (await resolveOwnerPropertyIds(ownerId, companyId))
+    .filter((id) => !visiblePropertyIds || visiblePropertyIds.includes(String(id)));
   const properties = await Property.find({ _id: { $in: propertyIds }, companyId }).lean();
   const snapshots = await getPropertyFinancialSnapshots(propertyIds, companyId);
   const snapList = Array.from(snapshots.values());
@@ -237,8 +276,9 @@ export async function getOwnerFinancials(ownerId: string, companyId: string) {
   };
 }
 
-export async function getOwnerMaintenance(ownerId: string, companyId: string) {
-  const propertyIds = await resolveOwnerPropertyIds(ownerId, companyId);
+export async function getOwnerMaintenance(ownerId: string, companyId: string, visiblePropertyIds?: string[]) {
+  const propertyIds = (await resolveOwnerPropertyIds(ownerId, companyId))
+    .filter((id) => !visiblePropertyIds || visiblePropertyIds.includes(String(id)));
   const requests = await MaintenanceRequest.find({ companyId, propertyId: { $in: propertyIds } })
     .populate('propertyId', 'name address')
     .sort({ updatedAt: -1 })
@@ -382,11 +422,12 @@ export async function generateOwnerDocument(input: {
   ownerId: string;
   companyId: string;
   companyName: string;
+  visiblePropertyIds?: string[];
 }) {
   const [portfolio, financials, maintenance, history] = await Promise.all([
-    getOwnerPortfolio(input.ownerId, input.companyId),
-    getOwnerFinancials(input.ownerId, input.companyId),
-    getOwnerMaintenance(input.ownerId, input.companyId),
+    getOwnerPortfolio(input.ownerId, input.companyId, input.visiblePropertyIds),
+    getOwnerFinancials(input.ownerId, input.companyId, input.visiblePropertyIds),
+    getOwnerMaintenance(input.ownerId, input.companyId, input.visiblePropertyIds),
     getOwnershipHistory(input.ownerId, input.companyId),
   ]);
 

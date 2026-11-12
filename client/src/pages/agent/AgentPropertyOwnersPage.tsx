@@ -12,11 +12,13 @@ import {
   Login as LoginIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import { useAgentPropertyOwnerService, PropertyOwner } from '../../services/agentPropertyOwnerService';
 import ownerManagementService from '../../services/ownerManagementService';
 import { OwnerListSummary, OwnersDashboardKpis } from '../../types/ownerManagement';
 import { SearchablePropertySelector } from '../../components/owners/SearchablePropertySelector';
 import api from '../../api/axios';
+import { formatCurrency, CurrencyCode } from '../../utils/money';
 
 interface PropertyOwnerFormData {
   firstName: string;
@@ -58,8 +60,8 @@ const softCardSx = {
   height: '100%',
 };
 
-const fmtMoney = (n: number) =>
-  new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
+const fmtMoney = (n: number, currency: CurrencyCode) =>
+  formatCurrency(n || 0, currency, { maximumFractionDigits: 0 });
 
 const KpiTile = ({ label, value, loading }: { label: string; value: string | number; loading?: boolean }) => (
   <Paper sx={{ ...softCardSx, p: 2, textAlign: 'center' }}>
@@ -73,6 +75,8 @@ const KpiTile = ({ label, value, loading }: { label: string; value: string | num
 const AgentPropertyOwnersPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, impersonate } = useAuth();
+  const { company } = useCompany();
+  const currency = (company?.workspacePreferences?.currency || 'USD') as CurrencyCode;
   const propertyOwnerService = useAgentPropertyOwnerService();
 
   const [summaries, setSummaries] = useState<OwnerListSummary[]>([]);
@@ -93,6 +97,7 @@ const AgentPropertyOwnersPage: React.FC = () => {
   const [balanceFilter, setBalanceFilter] = useState<'all' | 'outstanding' | 'clear'>('all');
   const [maintenanceFilter, setMaintenanceFilter] = useState<'all' | 'pending' | 'none'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'newest' | 'activity'>('name');
 
   useEffect(() => { fetchData(); }, []);
 
@@ -106,8 +111,12 @@ const AgentPropertyOwnersPage: React.FC = () => {
         api.get('/agents/properties'),
       ]);
       setKpis(dashboard.kpis);
-      setSummaries(dashboard.owners);
-      setOwners(ownersRes.owners);
+      const uniqueSummaries = new Map<string, OwnerListSummary>();
+      (dashboard.owners || []).forEach((owner) => uniqueSummaries.set(String(owner._id), owner));
+      setSummaries(Array.from(uniqueSummaries.values()));
+      const uniqueOwners = new Map<string, PropertyOwner>();
+      (ownersRes.owners || []).forEach((owner: PropertyOwner) => uniqueOwners.set(String(owner._id), owner));
+      setOwners(Array.from(uniqueOwners.values()));
       setProperties(propsRes.data);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch data');
@@ -152,8 +161,9 @@ const AgentPropertyOwnersPage: React.FC = () => {
         });
         setSnackbar({ open: true, message: 'Property owner updated successfully', severity: 'success' });
       } else {
-        await propertyOwnerService.create(formData);
-        setSnackbar({ open: true, message: 'Property owner created successfully', severity: 'success' });
+        const created = await propertyOwnerService.create(formData);
+        const portalNote = created?.portalMessage ? ` ${created.portalMessage}` : '';
+        setSnackbar({ open: true, message: `Property owner created successfully.${portalNote}`, severity: 'success' });
       }
       handleCloseDialog();
       fetchData();
@@ -163,13 +173,38 @@ const AgentPropertyOwnersPage: React.FC = () => {
   };
 
   const handleDelete = async (ownerId: string) => {
-    if (!window.confirm('Are you sure you want to delete this property owner?')) return;
+    if (!window.confirm('Delete this property owner? Owners with properties, leases or financial history are deactivated instead, and those records are kept.')) return;
     try {
-      await propertyOwnerService.remove(ownerId);
-      setSnackbar({ open: true, message: 'Property owner deleted successfully', severity: 'success' });
+      const result = await propertyOwnerService.remove(ownerId);
+      setSnackbar({ open: true, message: result?.message || 'Property owner deleted successfully', severity: 'success' });
       fetchData();
     } catch (err: any) {
       setSnackbar({ open: true, message: err.message || 'Failed to delete', severity: 'error' });
+    }
+  };
+
+  const handleReactivate = async (ownerId: string) => {
+    try {
+      await ownerManagementService.patchProfile(ownerId, { active: true });
+      setSnackbar({ open: true, message: 'Property owner reactivated', severity: 'success' });
+      fetchData();
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err?.response?.data?.message || err.message || 'Failed to reactivate property owner',
+        severity: 'error',
+      });
+    }
+  };
+
+  const openOwnerEditor = async (ownerId: string) => {
+    try {
+      const full = await propertyOwnerService.getById(ownerId);
+      const owner = full?.owner || full;
+      if (!owner?._id) throw new Error('Property owner details were not returned');
+      handleOpenDialog(owner);
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err.message || 'Failed to open property owner', severity: 'error' });
     }
   };
 
@@ -198,12 +233,18 @@ const AgentPropertyOwnersPage: React.FC = () => {
 
   const filteredSummaries = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
-    return summaries.filter((o) => {
+    const filtered = summaries.filter((o) => {
       if (statusFilter === 'active' && !o.active) return false;
       if (statusFilter === 'inactive' && o.active) return false;
-      if (q && !o.ownerName.toLowerCase().includes(q)) return false;
+      const full = owners.find((x) => String(x._id) === String(o._id));
+      if (q) {
+        const propertyText = (full?.properties || []).map((property: any) =>
+          `${property?.name || ''} ${property?.address || ''}`
+        ).join(' ');
+        const haystack = `${o.ownerName} ${o.email || ''} ${o.phone || ''} ${propertyText}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
       if (propertyFilter) {
-        const full = owners.find((x) => x._id === o._id);
         const ids = full?.properties?.map(getReferenceId).filter(Boolean) || [];
         if (!ids.includes(propertyFilter)) return false;
       }
@@ -215,7 +256,26 @@ const AgentPropertyOwnersPage: React.FC = () => {
       if (maintenanceFilter === 'none' && o.pendingMaintenanceCount > 0) return false;
       return true;
     });
-  }, [summaries, searchTerm, statusFilter, propertyFilter, occupancyFilter, balanceFilter, maintenanceFilter, owners]);
+    return filtered.sort((a, b) => {
+      if (sortBy === 'newest') {
+        return new Date(b.createdAt || b.lastActivity).getTime() - new Date(a.createdAt || a.lastActivity).getTime();
+      }
+      if (sortBy === 'activity') {
+        return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
+      }
+      return a.ownerName.localeCompare(b.ownerName, undefined, { sensitivity: 'base' });
+    });
+  }, [summaries, searchTerm, statusFilter, propertyFilter, occupancyFilter, balanceFilter, maintenanceFilter, owners, sortBy]);
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setPropertyFilter('');
+    setOccupancyFilter('all');
+    setBalanceFilter('all');
+    setMaintenanceFilter('all');
+    setStatusFilter('all');
+    setSortBy('name');
+  };
 
   if (loading) {
     return (
@@ -255,7 +315,7 @@ const AgentPropertyOwnersPage: React.FC = () => {
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={4}>
             <TextField
-              fullWidth size="small" label="Owner Name" placeholder="Search by name"
+              fullWidth size="small" label="Search owners" placeholder="Name, email, phone or property"
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
             />
@@ -300,14 +360,28 @@ const AgentPropertyOwnersPage: React.FC = () => {
             </FormControl>
           </Grid>
         </Grid>
-        <ToggleButtonGroup
-          value={statusFilter} exclusive size="small" sx={{ mt: 2 }}
-          onChange={(_, v) => v && setStatusFilter(v)}
-        >
-          <ToggleButton value="all">All Owners</ToggleButton>
-          <ToggleButton value="active">Active Owners</ToggleButton>
-          <ToggleButton value="inactive">Inactive Owners</ToggleButton>
-        </ToggleButtonGroup>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} sx={{ mt: 2 }}>
+          <ToggleButtonGroup
+            value={statusFilter} exclusive size="small"
+            onChange={(_, v) => v && setStatusFilter(v)}
+          >
+            <ToggleButton value="all">All Owners</ToggleButton>
+            <ToggleButton value="active">Active Owners</ToggleButton>
+            <ToggleButton value="inactive">Inactive Owners</ToggleButton>
+          </ToggleButtonGroup>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel>Sort</InputLabel>
+            <Select value={sortBy} label="Sort" onChange={(e) => setSortBy(e.target.value as 'name' | 'newest' | 'activity')}>
+              <MenuItem value="name">Name</MenuItem>
+              <MenuItem value="newest">Date created</MenuItem>
+              <MenuItem value="activity">Last activity</MenuItem>
+            </Select>
+          </FormControl>
+          <Button size="small" onClick={clearFilters}>Clear filters</Button>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: { sm: 'auto' } }}>
+            {filteredSummaries.length} of {summaries.length}
+          </Typography>
+        </Stack>
       </Paper>
 
       <Grid container spacing={3}>
@@ -325,8 +399,8 @@ const AgentPropertyOwnersPage: React.FC = () => {
                 </Typography>
                 <Divider sx={{ my: 1.5 }} />
                 <Stack spacing={0.5}>
-                  <Typography variant="body2"><strong>Monthly Revenue</strong> {fmtMoney(owner.monthlyRevenue)}</Typography>
-                  <Typography variant="body2"><strong>Outstanding Rent</strong> {fmtMoney(owner.outstandingBalance)}</Typography>
+                  <Typography variant="body2"><strong>Monthly Rent</strong> {fmtMoney(owner.monthlyRevenue, currency)}</Typography>
+                  <Typography variant="body2"><strong>Outstanding Rent</strong> {fmtMoney(owner.outstandingBalance, currency)}</Typography>
                   <Typography variant="body2"><strong>Pending Maintenance</strong> {owner.pendingMaintenanceCount}</Typography>
                   <Typography variant="body2" color="text.secondary">
                     Last Activity {new Date(owner.lastActivity).toLocaleDateString()}
@@ -336,17 +410,23 @@ const AgentPropertyOwnersPage: React.FC = () => {
                   <EmailIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
                   <Typography component="span" variant="caption">{owner.email}</Typography>
                 </Box>
+                {owner.phone && (
+                  <Box>
+                    <PhoneIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
+                    <Typography component="span" variant="caption">{owner.phone}</Typography>
+                  </Box>
+                )}
               </CardContent>
               <CardActions sx={{ flexWrap: 'wrap', gap: 0.5 }}>
                 <Button size="small" variant="contained" endIcon={<OpenIcon />} onClick={() => navigate(`/agent-dashboard/property-owners/${owner._id}`)}>
                   Open Portfolio
                 </Button>
                 <Tooltip title="Edit">
-                  <IconButton size="small" onClick={() => {
-                    const full = owners.find((o) => o._id === owner._id);
-                    if (full) handleOpenDialog(full);
-                  }}><EditIcon /></IconButton>
+                  <IconButton size="small" onClick={() => openOwnerEditor(owner._id)}><EditIcon /></IconButton>
                 </Tooltip>
+                {!owner.active && (
+                  <Button size="small" onClick={() => handleReactivate(owner._id)}>Reactivate</Button>
+                )}
                 <Tooltip title="Owner portal login">
                   <IconButton size="small" onClick={() => impersonate(owner._id)}><LoginIcon /></IconButton>
                 </Tooltip>

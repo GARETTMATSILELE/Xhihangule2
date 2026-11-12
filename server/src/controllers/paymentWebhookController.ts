@@ -156,6 +156,7 @@ export const resolveWebhookCreatedPaymentFinancials = async (input: {
       leaseId: input.leaseId,
       rentAllocated: amount,
       levyAllocated: 0,
+      commissionPercentage: (property as any)?.commission,
       vatOnCommission: commissionVat.vatOnCommission,
       vatTreatment: commissionVat.vatTreatment,
       vatRate: commissionVat.vatRate,

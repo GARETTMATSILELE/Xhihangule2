@@ -14,7 +14,7 @@ import { VatRecord } from '../models/VatRecord';
 import { JournalEntry } from '../models/JournalEntry';
 import { CommissionService } from '../services/commissionService';
 import { toPaymentCommissionSnapshot } from '../services/propertyCommissionCalculator';
-import { resolveCommissionVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock } from '../services/vatPolicyService';
+import { resolveCommissionVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock, stampVatDecision } from '../services/vatPolicyService';
 import { ensureSystemTaxRules } from '../services/taxRuleRegistry';
 import { ensurePaymentAccountingPosted } from '../services/paymentAccountingReconciliation';
 import { openExplicitPeriodForDate } from '../services/accountingPeriodService';
@@ -59,7 +59,7 @@ async function snapshotFor(property: any, companyId: string, amount: number, pay
     paymentDate,
     commissionType: 'management'
   });
-  return { policy, flags, calc, snapshot: toPaymentCommissionSnapshot(calc) };
+  return { policy, flags, calc, snapshot: stampVatDecision(toPaymentCommissionSnapshot(calc), policy) };
 }
 
 async function createCompletedPayment(input: {
@@ -137,7 +137,7 @@ async function main() {
     tinNumber: 'VAT-LIFE-TIN',
     country: 'Zimbabwe',
     ownerId: user._id,
-    taxProfile: { vatRegistered: true, vatNumber: 'ZW-VAT-TEST' }
+    taxProfile: { vatRegistered: true, vatNumber: 'ZW-VAT-TEST', vatCategory: 'standard' }
   });
   const unregistered = await Company.create({
     name: 'VAT Lifecycle Unregistered',

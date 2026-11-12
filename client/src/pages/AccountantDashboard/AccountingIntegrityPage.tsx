@@ -25,6 +25,7 @@ import accountingService, {
   AccountingIntegrityRow,
   AccountingIntegritySummary
 } from '../../services/accountingService';
+import HistoricalVatSchedule from './HistoricalVatSchedule';
 
 const COMPONENT_OPTIONS = [
   { value: '', label: 'All components' },
@@ -55,13 +56,19 @@ function moneyText(value: unknown, currency = ''): string {
 }
 
 function exceptionClassForRow(row: AccountingIntegrityRow): string {
-  const text = `${row.component || ''} ${row.missingRecord || ''} ${row.issue || ''}`.toLowerCase();
+  if (row.classification) return row.classification;
+  const text = `${row.component || ''} ${row.missingRecord || ''} ${row.issue || ''} ${row.explanation || ''}`.toLowerCase();
   if (row.status === 'ORPHANED') return 'MANUAL REVIEW';
+  if (text.includes('unposted rental') || text.includes('unposted_rental')) return 'UNPOSTED RENTAL';
+  if (text.includes('historical_journal_gap') || text.includes('historical journal')) return 'HISTORICAL JOURNAL GAP';
+  if (text.includes('vat_configuration') || text.includes('vat configuration')) return 'VAT CONFIGURATION REVIEW';
+  if (text.includes('tax obligation') || text.includes('missing_tax_obligation')) return 'VAT OBLIGATION MISSING';
+  if (text.includes('not applicable') || text.includes('zero owner')) return 'ZERO OWNER INCOME';
+  if (text.includes('rate review') || text.includes('commission percentage')) return 'RATE REVIEW';
   if (text.includes('another payment') || text.includes('collision')) return 'REFERENCE COLLISION';
   if (text.includes('deposit')) return 'DEPOSIT RECONCILIATION';
-  if (text.includes('owner') || text.includes('vat')) return 'HISTORICAL VARIANCE';
-  if (text.includes('journal')) return 'MISSING JOURNAL';
-  return 'MANUAL REVIEW';
+  if (text.includes('journal')) return 'INCOMPLETE';
+  return 'INCOMPLETE';
 }
 
 function statusColor(status: string): 'success' | 'warning' | 'error' | 'default' {
@@ -233,7 +240,11 @@ const AccountingIntegrityPage: React.FC = () => {
     { label: 'Incomplete', value: summary?.incomplete ?? '—', color: 'warning.main' },
     { label: 'Mismatched', value: summary?.mismatched ?? '—', color: 'error.main' },
     { label: 'Orphaned', value: summary?.orphaned ?? '—', color: 'error.main' },
-    { label: 'Exceptions', value: summary?.exceptions ?? '—', color: 'secondary.main' }
+    { label: 'Exceptions', value: summary?.exceptions ?? '—', color: 'secondary.main' },
+    { label: 'Unjournalled receipts', value: summary?.historicalUnjournalledReceipts ?? '—', color: 'text.secondary' },
+    { label: 'Historical journal gaps', value: summary?.historicalJournalGaps ?? '—', color: 'text.secondary' },
+    { label: 'Unposted rentals', value: summary?.unpostedRentals ?? '—', color: 'warning.main' },
+    { label: 'VAT configuration', value: summary?.vatConfigurationReviews ?? '—', color: 'warning.main' }
   ];
 
   const componentRows = recon
@@ -244,14 +255,14 @@ const AccountingIntegrityPage: React.FC = () => {
         actual: recon.actual?.amounts?.[key],
         status: recon.componentStatus?.[key] || (recon.missing?.includes(key) ? 'MISSING' : 'VALID'),
         required: Boolean(recon.expected?.[key])
-      })).filter((row) => row.required || row.status === 'MISSING' || row.status === 'MISMATCHED')
+      })).filter((row) => row.required || row.status === 'MISSING' || row.status === 'MISMATCHED' || row.status === 'NOT_APPLICABLE')
     : [];
 
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 1, fontWeight: 600 }}>Accounting Integrity</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Company-wide check of whether accounting projections agree with Payments, the single source of truth.
+        Company-wide check of whether accounting projections agree with Payments, the single source of truth. Receipts without a journal stay visible as a separate historical population and are not reconstructed. A zero owner-income result does not hide a missing journal.
       </Typography>
 
       {healthy && (
@@ -327,6 +338,8 @@ const AccountingIntegrityPage: React.FC = () => {
         </Grid>
       </Paper>
 
+      <HistoricalVatSchedule />
+
       <Paper sx={{ p: 2, mb: 2 }}>
         <Typography sx={{ fontWeight: 700, mb: 1 }}>Trust visibility</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -372,6 +385,11 @@ const AccountingIntegrityPage: React.FC = () => {
                   Company {selected.companyId || 'unknown'}. Amount {moneyText(selected.amount, selected.currency)}. Missing record: {selected.missingRecord || 'see component'}. {selected.recommendedReview}
                 </Alert>
               )}
+              {selected.commercialArrangement === 'confirmed' && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Commercial arrangement: confirmed. Owner income is not applicable. A missing receipt journal stays visible, and the receipt is not accounting-complete while that journal is absent.
+                </Alert>
+              )}
               {trace?.allocation && (
                 <Box sx={{ mb: 2, p: 1.5, bgcolor: trace.allocation.reviewRequired ? '#fff7ed' : '#edf7f1', borderRadius: 1 }}>
                   <Typography sx={{ fontWeight: 700, mb: 0.5 }}>How the owner amount is calculated</Typography>
@@ -392,7 +410,7 @@ const AccountingIntegrityPage: React.FC = () => {
               {recon && (
                 <>
                   <Alert severity={recon.exceptionClass === 'READY FOR RECOVERY' ? 'success' : 'warning'} sx={{ mb: 2 }}>
-                    {recon.exceptionClass || exceptionClassForRow(selected)}. {recon.recommendedAction || 'Recovery stays on the existing single-payment repair pipeline. Nothing is posted from this screen until an accountant confirms it.'}
+                    {recon.exceptionClass || exceptionClassForRow(selected)}. {recon.recommendedAction || 'Recovery stays on the existing single-payment repair pipeline. Nothing is posted from this screen until an accountant confirms it.'} Confirming a repair does not approve a historical VAT obligation.
                   </Alert>
                   <Typography variant="body2">Payment amount: {moneyText(recon.expected?.amounts?.journal, selected.currency)}</Typography>
                   <Typography variant="body2">Payment date: {selected.date ? new Date(selected.date).toLocaleDateString() : '—'}</Typography>
@@ -428,6 +446,8 @@ const AccountingIntegrityPage: React.FC = () => {
                   {repairResult.dryRun ? 'Dry run complete. ' : 'Repair finished. '}
                   Accounting complete: {repairResult.accountingComplete ? 'YES' : 'NO'}
                   {repairResult.requiresManualReview?.length ? '. Manual accounting review required.' : ''}
+                  {repairResult.vatObligationSkipped ? ` Historical VAT was not recognised (${repairResult.vatObligationSkipped}). No VAT payable journal line, VAT obligation, or VAT record change was made.` : ''}
+                  {repairResult.historicalVatReview ? ' The repair was blocked because the receipt journal cannot be balanced without recognising unsupported VAT.' : ''}
                 </Alert>
               )}
               {selected.canRetry && selected.operationId && (

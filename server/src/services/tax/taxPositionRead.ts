@@ -5,6 +5,8 @@ import { TaxRecord } from '../../models/TaxRecord';
 import { TaxPayout } from '../../models/TaxPayout';
 import { TrustAccount } from '../../models/TrustAccount';
 import { Property } from '../../models/Property';
+import { Payment } from '../../models/Payment';
+import { formatPropertyAddress, resolveLinkedPropertyId } from './taxDashboard';
 import { ChartOfAccount } from '../../models/ChartOfAccount';
 import { GL } from './chartAccounts';
 import { buildTaxPosition, type TaxPosition } from './taxPosition';
@@ -29,34 +31,58 @@ export async function loadCompanyTaxPosition(companyId: string, asOf?: Date): Pr
   ]);
 
   const trustIds = [...records, ...payouts].map((row: any) => row.trustAccountId).filter(Boolean);
-  const trusts = trustIds.length
-    ? await TrustAccount.find({ _id: { $in: trustIds }, companyId: company }).select('propertyId').lean()
-    : [];
+  const missingPropertyPaymentIds = obligations
+    .filter((row: any) => !row.propertyId && row.paymentId)
+    .map((row: any) => row.paymentId);
+  const [trusts, sourcePayments] = await Promise.all([
+    trustIds.length
+      ? TrustAccount.find({ _id: { $in: trustIds }, companyId: company }).select('propertyId').lean()
+      : [],
+    missingPropertyPaymentIds.length
+      ? Payment.find({ _id: { $in: missingPropertyPaymentIds }, companyId: company }).select('propertyId').lean()
+      : []
+  ]);
   const trustProperty = new Map(trusts.map((row: any) => [String(row._id), row.propertyId ? String(row.propertyId) : '']));
+  const paymentProperty = new Map(sourcePayments.map((row: any) => [String(row._id), row.propertyId ? String(row.propertyId) : '']));
+  const propertyIdOf = (row: any) => resolveLinkedPropertyId({
+    obligationPropertyId: row.propertyId ? String(row.propertyId) : null,
+    paymentPropertyId: row.paymentId ? paymentProperty.get(String(row.paymentId)) : null
+  });
   const propertyIds = [
-    ...obligations.map((row: any) => row.propertyId),
+    ...obligations.map((row: any) => propertyIdOf(row)),
     ...trusts.map((row: any) => row.propertyId)
   ].filter(Boolean);
   const properties = propertyIds.length
     ? await Property.find({ _id: { $in: propertyIds }, companyId: company }).select('name address').lean()
     : [];
-  const propertyName = new Map(properties.map((row: any) => [String(row._id), String(row.name || row.address || '')]));
-  const nameOf = (id?: unknown) => (id ? propertyName.get(String(id)) || String(id) : undefined);
+  const propertyById = new Map(properties.map((row: any) => [String(row._id), row]));
+  const nameOf = (id?: unknown) => {
+    if (!id) return undefined;
+    const property = propertyById.get(String(id));
+    const name = String(property?.name || '').trim();
+    const address = formatPropertyAddress(property?.address);
+    return name || address || String(id);
+  };
+  const addressOf = (id?: unknown) => (id ? formatPropertyAddress(propertyById.get(String(id))?.address) : '');
 
   return buildTaxPosition({
     asOf,
-    obligations: obligations.map((row: any) => ({
+    obligations: obligations.map((row: any) => {
+      const propertyId = propertyIdOf(row);
+      return {
       id: String(row._id),
       taxType: String(row.taxType),
-      propertyId: row.propertyId ? String(row.propertyId) : null,
-      propertyName: nameOf(row.propertyId),
+      propertyId,
+      propertyName: nameOf(propertyId),
+      propertyAddress: addressOf(propertyId),
       paymentId: row.paymentId ? String(row.paymentId) : null,
       taxPeriod: String(row.taxPeriod || ''),
       taxAmount: Number(row.taxAmount || 0),
       status: String(row.status || ''),
       reversalOf: row.reversalOf ? String(row.reversalOf) : null,
       transactionDate: row.transactionDate
-    })),
+    };
+    }),
     payments: payments.map((row: any) => ({
       id: String(row._id),
       status: String(row.status || ''),
@@ -76,6 +102,7 @@ export async function loadCompanyTaxPosition(companyId: string, asOf?: Date): Pr
         taxType: String(row.taxType),
         propertyId,
         propertyName: nameOf(propertyId),
+        propertyAddress: addressOf(propertyId),
         amount: Number(row.amount || 0),
         createdAt: row.createdAt
       };
@@ -87,6 +114,7 @@ export async function loadCompanyTaxPosition(companyId: string, asOf?: Date): Pr
         taxType: String(row.taxType),
         propertyId,
         propertyName: nameOf(propertyId),
+        propertyAddress: addressOf(propertyId),
         amount: Number(row.amount || 0),
         createdAt: row.payoutDate || row.createdAt
       };

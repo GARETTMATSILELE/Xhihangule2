@@ -73,6 +73,7 @@ export async function buildRentalCorrectionCommission(source: any): Promise<Rent
       leaseId: source.leaseId,
       rentAllocated: amount,
       levyAllocated: levy,
+      commissionPercentage: (property as any)?.commission,
       vatOnCommission: flags.vatOnCommission,
       vatTreatment: flags.vatTreatment,
       vatRate: flags.vatRate,

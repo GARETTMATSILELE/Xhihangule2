@@ -45,6 +45,7 @@ function introSnapshot(rentAllocated: number, alreadyConsumed: number, levyAlloc
     alreadyConsumed
   });
   const calculated = snapshotFromIntroductionAllocation(allocation, {
+    commissionPercentage: 100,
     vatOnCommission: false,
     preaPercentOfTotal: 0.03,
     agentPercentOfRemaining: 0.6,

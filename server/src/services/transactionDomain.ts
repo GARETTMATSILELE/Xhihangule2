@@ -65,6 +65,16 @@ export class OwnerIncomeAmountMissingError extends Error {
   }
 }
 
+export class OwnerIncomeNotApplicableError extends Error {
+  readonly code = 'OWNER_INCOME_NOT_APPLICABLE';
+  readonly statusCode = 200;
+
+  constructor(paymentId: string) {
+    super(`Owner income is not applicable for payment ${paymentId} because the stored commission snapshot calculates zero.`);
+    this.name = 'OwnerIncomeNotApplicableError';
+  }
+}
+
 export class SaleContextRequiredError extends Error {
   readonly code = 'SALE_CONTEXT_REQUIRED';
   readonly statusCode = 400;

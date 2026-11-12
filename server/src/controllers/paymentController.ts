@@ -20,6 +20,7 @@ import { notifyOwnerOfRentPayment, notifyOwnerOfRentReversal } from '../services
 import accountingIntegrationService from '../services/accountingIntegrationService';
 import { reversePaymentAccounting } from '../services/paymentAccountingOrchestrator';
 import { resolveCommissionVatPolicy, resolveSaleVatPolicy, commissionVatFlagsFromPolicy, centralVatRateBlock, stampVatDecision } from '../services/vatPolicyService';
+import { resolveStoredCommissionPercentage } from '../services/commissionRateResolution';
 import { assertVatPeriodOpen } from '../services/vatReturnService';
 import { openReview } from '../services/taxObligationService';
 import { throwOnceIfArmed } from '../services/testFailureSeam';
@@ -840,6 +841,7 @@ export const createPayment = async (req: Request, res: Response) => {
         leaseId: lease._id,
         rentAllocated: Number(amount || 0),
         levyAllocated: 0,
+        commissionPercentage: (property as any)?.commission,
         vatOnCommission: commissionVat.vatOnCommission,
         vatTreatment: commissionVat.vatTreatment,
         vatRate: commissionVat.vatRate,
@@ -1246,23 +1248,27 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
       let propertyVatOnCommission = false;
       let propertyVatTreatment: 'inclusive' | 'exclusive' | undefined;
       let propertyRentResolved = 0;
+      let storedCommissionPercentage: unknown;
       if (!manualProperty && rawPropertyId) {
         const prop = await Property.findById(new mongoose.Types.ObjectId(rawPropertyId))
           .select('commission rentalType ownerId vatOnCommission vatCommissionTreatment rent')
           .lean();
         if (prop) {
-          if (typeof (prop as any)?.commission === 'number') {
-            commissionPercentResolved = Number((prop as any).commission);
+          storedCommissionPercentage = (prop as any)?.commission;
+          const resolvedRate = resolveStoredCommissionPercentage(storedCommissionPercentage);
+          if (resolvedRate.ok) {
+            commissionPercentResolved = resolvedRate.percent;
+          } else if ((prop as any)?.commission !== undefined && (prop as any)?.commission !== null && (prop as any)?.commission !== '') {
+            return { error: { status: 400, code: resolvedRate.code, message: resolvedRate.message } };
           }
           if ((prop as any)?.rentalType) {
             rentalTypeResolved = (prop as any).rentalType as any;
           }
           propertyVatOnCommission = Boolean((prop as any)?.vatOnCommission);
           propertyRentResolved = Number((prop as any)?.rent || 0);
-          if (propertyVatOnCommission) {
-            propertyVatTreatment = String((prop as any)?.vatCommissionTreatment || '').toLowerCase() === 'inclusive'
-              ? 'inclusive'
-              : 'exclusive';
+          const rawVatTreatment = String((prop as any)?.vatCommissionTreatment || '').trim().toLowerCase();
+          if (rawVatTreatment === 'inclusive' || rawVatTreatment === 'exclusive') {
+            propertyVatTreatment = rawVatTreatment;
           }
           if (!resolvedOwnerId && (prop as any)?.ownerId) {
             resolvedOwnerId = String((prop as any).ownerId);
@@ -1327,6 +1333,7 @@ export const createPaymentAccountant = async (req: Request, res: Response) => {
             leaseId: rawLeaseId,
             rentAllocated: isDepositOnly ? 0 : Math.max(0, commissionBaseAmount),
             levyAllocated: isDepositOnly ? 0 : levyAllocated,
+            commissionPercentage: storedCommissionPercentage,
             vatOnCommission: propertyVatOnCommission,
             vatTreatment: propertyVatTreatment,
             vatRate: commissionVat.vatRate,
@@ -2746,11 +2753,18 @@ export const repairPaymentAccountingExplicit = async (req: Request, res: Respons
     if (!dryRun && !reason) {
       return res.status(400).json({ message: 'Manual accounting repair requires confirm=true, dryRun=false, and a non-empty reason' });
     }
+    const approveHistoricalVatObligation = req.body?.approveHistoricalVatObligation === true;
+    if (!dryRun && approveHistoricalVatObligation && reason.toLowerCase().indexOf('approve historical vat') === -1) {
+      return res.status(400).json({
+        message: 'Historical VAT obligation approval requires the reason to include "approve historical VAT". A normal repair reason is not approval.'
+      });
+    }
     const result = await repairPaymentAccounting(String(payment._id), {
       dryRun,
       reason,
       userId: req.user.userId,
-      createdBy: req.user.userId
+      createdBy: req.user.userId,
+      approveHistoricalVatObligation
     });
     return res.json(result);
   } catch (error) {
@@ -3705,6 +3719,7 @@ export const createPaymentPublic = async (req: Request, res: Response) => {
         leaseId: lease._id,
         rentAllocated: Number(amount || 0),
         levyAllocated: 0,
+        commissionPercentage: (property as any)?.commission,
         vatOnCommission: commissionVat.vatOnCommission,
         vatTreatment: commissionVat.vatTreatment,
         vatRate: commissionVat.vatRate,
@@ -4382,6 +4397,7 @@ export const finalizeProvisionalPayment = async (req: Request, res: Response) =>
             leaseId: (req.body as any).leaseId || (payment as any).leaseId,
             rentAllocated: isDepositOnly ? 0 : Math.max(0, Number((payment as any).rentAllocated || payment.amount || 0)),
             levyAllocated: isDepositOnly ? 0 : Number((payment as any).levyAllocated || 0),
+            commissionPercentage: (property as any)?.commission,
             vatOnCommission: commissionVat.vatOnCommission,
             vatTreatment: commissionVat.vatTreatment,
             vatRate: commissionVat.vatRate,

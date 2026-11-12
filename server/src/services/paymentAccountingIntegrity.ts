@@ -14,12 +14,16 @@ import { JournalEntry } from '../models/JournalEntry';
 import { VatRecord } from '../models/VatRecord';
 import { RentalDeposit } from '../models/rentalDeposit';
 import { AccountingException } from '../models/AccountingException';
+import { TaxReviewItem } from '../models/TaxReviewItem';
 import { PAYMENT_RECONCILIATION_BATCH_SIZE } from './paymentReconciliationQuery';
 import { buildAccountingIntegrityCandidateFilter } from './paymentAccountingProjection';
 import {
   applyReconciliationOutcome,
+  loadAccountingActualSnapshot,
   reconcilePayment
 } from './paymentAccountingReconciliation';
+import { classifyAccountingIntegrityRow, legitimateZeroOwnerIncome } from './accountingIntegrityClassification';
+import { roundMoney } from '../utils/money';
 
 function asObjectId(value: string): mongoose.Types.ObjectId | null {
   return mongoose.Types.ObjectId.isValid(value) ? new mongoose.Types.ObjectId(value) : null;
@@ -306,6 +310,10 @@ export type AccountingIntegritySummary = {
   orphaned: number;
   exceptions: number;
   orphanScanWindowHours: number;
+  historicalUnjournalledReceipts: number;
+  historicalJournalGaps: number;
+  unpostedRentals: number;
+  vatConfigurationReviews: number;
 };
 
 export type AccountingIntegrityListFilters = {
@@ -331,13 +339,19 @@ function companyOid(companyId: string): mongoose.Types.ObjectId {
 export async function getCompanyAccountingIntegritySummary(companyId: string): Promise<AccountingIntegritySummary> {
   const cid = companyOid(companyId);
   const tracked = { companyId: cid, accountingComplete: { $in: [true, false] } };
-  const [totalChecked, complete, incomplete, mismatched, orphaned, exceptions] = await Promise.all([
+  const [totalChecked, complete, incomplete, mismatched, orphaned, exceptions, unjournalled, vatConfigurationReviews] = await Promise.all([
     Payment.countDocuments(tracked),
     Payment.countDocuments({ companyId: cid, accountingComplete: true }),
     Payment.countDocuments({ companyId: cid, accountingComplete: false }),
     AccountingException.countDocuments({ companyId: cid, status: 'open', issueType: 'mismatched' }),
     AccountingException.countDocuments({ companyId: cid, status: 'open', kind: 'orphan_accounting' }),
-    AccountingException.countDocuments({ companyId: cid, status: 'open' })
+    AccountingException.countDocuments({ companyId: cid, status: 'open' }),
+    countUnjournalledPopulations(cid),
+    TaxReviewItem.countDocuments({
+      companyId: cid,
+      kind: { $in: ['VAT_CONFIGURATION_INCOMPLETE', 'VAT_CHARGED_WHILE_COMPANY_NOT_REGISTERED'] },
+      status: { $in: ['open', 'OPEN', 'UNDER_REVIEW'] }
+    })
   ]);
   return {
     totalChecked,
@@ -346,8 +360,83 @@ export async function getCompanyAccountingIntegritySummary(companyId: string): P
     mismatched,
     orphaned,
     exceptions,
-    orphanScanWindowHours: ORPHAN_SCAN_WINDOW_HOURS
+    orphanScanWindowHours: ORPHAN_SCAN_WINDOW_HOURS,
+    historicalUnjournalledReceipts: unjournalled.total,
+    historicalJournalGaps: unjournalled.historicalJournalGaps,
+    unpostedRentals: unjournalled.unpostedRentals,
+    vatConfigurationReviews
   };
+}
+
+async function countUnjournalledPopulations(companyId: mongoose.Types.ObjectId): Promise<{
+  total: number;
+  historicalJournalGaps: number;
+  unpostedRentals: number;
+}> {
+  const payments = await Payment.find({
+    companyId,
+    status: 'completed',
+    amount: { $gt: 0 }
+  }).select('_id amount commissionDetails levyAllocated').lean();
+  if (!payments.length) return { total: 0, historicalJournalGaps: 0, unpostedRentals: 0 };
+  const ids = payments.map((row: any) => String(row._id));
+  const journals = await JournalEntry.find({
+    companyId,
+    status: 'posted',
+    sourceId: { $in: ids }
+  }).select('sourceId').lean();
+  const journaled = new Set((journals as any[]).map((row) => String(row.sourceId || '').split(':')[0]));
+  const unjournalled = (payments as any[]).filter((row) => !journaled.has(String(row._id)));
+  if (!unjournalled.length) return { total: 0, historicalJournalGaps: 0, unpostedRentals: 0 };
+  const objectIds = unjournalled.map((row) => row._id);
+  const keys = unjournalled.map((row) => `payment:${row._id}`);
+  const [propertyAccounts, agentAccounts, companyAccount] = await Promise.all([
+    PropertyAccount.find({ 'transactions.idempotencyKey': { $in: keys } })
+      .select('transactions.idempotencyKey transactions.type transactions.status')
+      .lean(),
+    AgentAccount.find({ 'transactions.paymentId': { $in: objectIds } })
+      .select('transactions.paymentId transactions.type transactions.status')
+      .lean(),
+    CompanyAccount.findOne({ companyId })
+      .select('transactions.paymentId transactions.isArchived')
+      .lean()
+  ]);
+  const ownerPosted = new Set<string>();
+  for (const account of propertyAccounts as any[]) {
+    for (const tx of account?.transactions || []) {
+      if (String(tx?.type) === 'income' && String(tx?.status) === 'completed' && String(tx?.idempotencyKey || '').startsWith('payment:')) {
+        ownerPosted.add(String(tx.idempotencyKey).slice('payment:'.length));
+      }
+    }
+  }
+  const agentPosted = new Set<string>();
+  for (const account of agentAccounts as any[]) {
+    for (const tx of account?.transactions || []) {
+      if (String(tx?.type) === 'commission' && String(tx?.status) === 'completed' && tx?.paymentId) {
+        agentPosted.add(String(tx.paymentId));
+      }
+    }
+  }
+  const companyPosted = new Set<string>();
+  for (const tx of ((companyAccount as any)?.transactions || [])) {
+    if (tx?.paymentId && tx?.isArchived !== true) companyPosted.add(String(tx.paymentId));
+  }
+  let historicalJournalGaps = 0;
+  let unpostedRentals = 0;
+  for (const payment of unjournalled) {
+    const id = String(payment._id);
+    const details = payment.commissionDetails || {};
+    const zeroOwner = legitimateZeroOwnerIncome(payment);
+    const ownerExpected = roundMoney(Number(details.ownerAmount || 0)) > 0 && !zeroOwner;
+    const agentExpected = roundMoney(Number(details.agentShare || 0)) > 0;
+    const companyExpected = roundMoney(Number(details.agencyShare || 0)) > 0;
+    const projectionMissing = (ownerExpected && !ownerPosted.has(id))
+      || (agentExpected && !agentPosted.has(id))
+      || (companyExpected && !companyPosted.has(id));
+    if (projectionMissing) unpostedRentals += 1;
+    else historicalJournalGaps += 1;
+  }
+  return { total: unjournalled.length, historicalJournalGaps, unpostedRentals };
 }
 
 function displayName(doc: any, fallback = ''): string {
@@ -437,12 +526,26 @@ export async function listCompanyAccountingInconsistencies(
   const paymentIds = Array.from(new Set(rows.map((row: any) => row.paymentId).filter(Boolean).map((id: any) => String(id))));
   const payments = paymentIds.length
     ? await Payment.find({ _id: { $in: paymentIds }, companyId: cid })
-      .select('referenceNumber paymentDate propertyId tenantId agentId currency amount depositAmount accountingComplete')
-      .populate('propertyId', 'name address')
+      .select('referenceNumber paymentDate propertyId tenantId agentId currency amount depositAmount levyAllocated accountingComplete accountingStatus commissionDetails rentalPeriodMonth rentalPeriodYear paymentType companyId')
+      .populate('propertyId', 'name address commission rentalType')
       .populate('tenantId', 'name firstName lastName')
       .lean()
     : [];
   const paymentMap = new Map(payments.map((p: any) => [String(p._id), p]));
+  const presenceEntries = await Promise.all(payments.map(async (payment: any) => {
+    try {
+      const actual = await loadAccountingActualSnapshot(payment);
+      return [String(payment._id), {
+        ownerIncome: actual.ownerIncome,
+        agentCommission: actual.agentCommission,
+        companyCommission: actual.companyCommission,
+        journal: actual.journal
+      }] as const;
+    } catch {
+      return [String(payment._id), null] as const;
+    }
+  }));
+  const presenceMap = new Map(presenceEntries);
 
   const items = rows.map((row: any) => {
     const payment = row.paymentId ? paymentMap.get(String(row.paymentId)) : undefined;
@@ -451,6 +554,16 @@ export async function listCompanyAccountingInconsistencies(
     const statusLabel = row.kind === 'orphan_accounting'
       ? 'ORPHANED'
       : (row.issueType === 'mismatched' ? 'MISMATCHED' : 'MISSING');
+    const classified = classifyAccountingIntegrityRow({
+      component,
+      issue: row.error || statusLabel,
+      missingRecord: Array.isArray(row.missingComponents) ? row.missingComponents.join(' ') : '',
+      status: statusLabel,
+      payment,
+      propertyCommission: payment?.propertyId?.commission,
+      rentalType: payment?.propertyId?.rentalType,
+      presence: payment ? presenceMap.get(String(payment._id)) || null : null
+    });
     return {
       id: String(row._id),
       date: payment?.paymentDate || row.detectedAt,
@@ -465,6 +578,10 @@ export async function listCompanyAccountingInconsistencies(
       actual: row.actual != null ? row.actual : (statusLabel === 'ORPHANED' ? 'Accounting record exists' : issue?.actual),
       difference: row.difference != null ? row.difference : issue?.difference,
       status: statusLabel,
+      classification: classified.classification,
+      explanation: classified.explanation,
+      ownerIncomeDisposition: classified.ownerIncomeDisposition,
+      commercialArrangement: classified.commercialArrangement || '',
       accountingComplete: payment?.accountingComplete === true,
       canRepair: row.kind !== 'orphan_accounting' && row.kind !== 'financial_review' && Boolean(row.paymentId),
       amount: Number(payment?.amount || row.expected || 0),
@@ -472,7 +589,7 @@ export async function listCompanyAccountingInconsistencies(
       missingRecord: Array.isArray(row.missingComponents) && row.missingComponents.length
         ? row.missingComponents.join(', ')
         : (row.component || ''),
-      recommendedReview: row.error || 'Review this payment before any correction. Financial records were not changed by this check.',
+      recommendedReview: classified.explanation || row.error || 'Review this payment before any correction. Financial records were not changed by this check.',
       detectedAt: row.detectedAt,
       operationId: row.accountingRef?.transactionId || '',
       canRetry: row.component === 'LEDGER_RETRY_EXHAUSTED' && String(row.actual || '') === 'transient'

@@ -1,7 +1,7 @@
 import { PaymentSession } from '../models/PaymentSession';
 import { BillingPayment } from '../models/BillingPayment';
 import { activateSubscriptionFromPayment } from './billingActivationService';
-import { evaluateProviderPoll, paynowModeMatchesSession, ProviderPoll } from './registrationPaymentPolicy';
+import { evaluateProviderPoll, isOfficialPaynowTestSession, officialPaynowTestAlreadyVerified, paynowModeMatchesSession, ProviderPoll } from './registrationPaymentPolicy';
 import { recordAuditEvent } from './auditService';
 import { upsertFinancialReview } from './financialOperationVisibility';
 import { logger } from '../utils/logger';
@@ -157,6 +157,51 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
     error.code = 'PAYMENT_MISMATCH';
     throw error;
   }
+  if (decision.outcome === 'paid' && isOfficialPaynowTestSession(session.metadata)) {
+    if (!officialPaynowTestAlreadyVerified(session.metadata)) {
+      const audited = await recordAuditEvent({
+        companyId: String(session.companyId),
+        action: 'checkout.test_verified',
+        entityType: 'PaymentSession',
+        entityId: String(session._id),
+        metadata: {
+          providerRef: session.providerRef,
+          officialPaynowTest: true,
+          amount: Number(poll.amount),
+          currency: String(poll.currency || session.currency || 'USD'),
+          paynowReference: poll.paynowReference,
+          origin: poll.origin || 'webhook'
+        }
+      });
+      if (!audited) {
+        const error: any = new Error('The official Paynow test was not recorded because the audit event could not be stored');
+        error.code = 'AUDIT_PERSIST_FAILED';
+        throw error;
+      }
+      session.metadata = {
+        ...(session.metadata || {}),
+        officialPaynowTest: true,
+        officialPaynowTestResult: {
+          verified: true,
+          amount: Number(poll.amount),
+          currency: String(poll.currency || session.currency || 'USD'),
+          paynowReference: poll.paynowReference || undefined,
+          origin: poll.origin || 'webhook',
+          verifiedAt: new Date().toISOString()
+        }
+      };
+      session.markModified('metadata');
+      await session.save();
+      logger.info('paynow_official_test_recorded', {
+        correlationId: reference,
+        reference,
+        paymentSessionId: String(session._id),
+        amount: Number(poll.amount),
+        currency: String(poll.currency || session.currency || 'USD')
+      });
+    }
+    return { found: true as const, paymentStatus: 'test_verified', activated: false, testRecorded: true, session };
+  }
   if (decision.outcome === 'paid') {
     const audited = await recordAuditEvent({
       companyId: String(session.companyId),
@@ -166,7 +211,8 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
       metadata: {
         providerRef: session.providerRef,
         paynowMode: (session.metadata as { paynowMode?: string } | undefined)?.paynowMode || undefined,
-        testTransaction: (session.metadata as { paynowMode?: string } | undefined)?.paynowMode === 'test'
+        testTransaction: (session.metadata as { paynowMode?: string } | undefined)?.paynowMode === 'test',
+        origin: poll.origin || 'webhook'
       }
     });
     if (!audited) {

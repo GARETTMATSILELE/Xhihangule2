@@ -25,7 +25,8 @@ import { evaluatePermanentAccountingPolicy } from './accountingPostingPolicy';
 import {
   historicalTransactionDomain,
   ledgerForDomain,
-  OwnerIncomeAmountMissingError
+  OwnerIncomeAmountMissingError,
+  OwnerIncomeNotApplicableError
 } from './transactionDomain';
 import { classifyDuplicateGroup, classifyLedgerTransactionDuplicates } from './propertyAccountDuplicateInventory';
 import { computePropertyAccountTotals } from './propertyAccountTotals';
@@ -1627,6 +1628,10 @@ export class PropertyAccountService {
         passThroughTotal
       });
       if (Number(payment.amount || 0) > 0 && ownerIncomeAmount <= 0) {
+        const { legitimateZeroOwnerIncome } = await import('./accountingIntegrityClassification');
+        if (legitimateZeroOwnerIncome(payment)) {
+          throw new OwnerIncomeNotApplicableError(paymentId);
+        }
         throw new OwnerIncomeAmountMissingError(paymentId);
       }
       const ownerSeamKey = String(paymentId);

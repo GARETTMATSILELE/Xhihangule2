@@ -8,6 +8,8 @@ import { AccountingException } from '../models/AccountingException';
 import PropertyAccount from '../models/PropertyAccount';
 import { evaluatePermanentAccountingPolicy } from './accountingPostingPolicy';
 import { roundMoney } from '../utils/money';
+import { loadAccountingActualSnapshot } from './paymentAccountingReconciliation';
+import { legitimateZeroOwnerIncome } from './accountingIntegrityClassification';
 
 export type FinancialPostingGap = {
   companyId: string;
@@ -53,7 +55,7 @@ async function inspectFinancialPostingGaps(companyId: string, limit = 200): Prom
     status: { $in: ['completed', 'reversed'] },
     isProvisional: { $ne: true }
   })
-    .select('_id companyId referenceNumber amount status accountingComplete accountingStatus reversalState reversalOfPaymentId commissionDetails paymentType depositAmount')
+    .select('_id companyId referenceNumber amount status accountingComplete accountingStatus reversalState reversalOfPaymentId commissionDetails paymentType depositAmount levyAllocated rentalPeriodMonth rentalPeriodYear')
     .sort({ updatedAt: -1 })
     .limit(Math.max(1, Math.min(limit, 200)))
     .lean();
@@ -105,19 +107,48 @@ async function inspectFinancialPostingGaps(companyId: string, limit = 200): Prom
         status: 'posted',
         sourceId: { $ne: paymentId }
       }).select('sourceId companyId').lean();
-      findings.push(gap(
-        payment,
-        otherPaymentJournal ? 'receipt journal belongs to another payment' : 'accounting journal',
-        otherPaymentJournal
-          ? 'JOURNAL_REFERENCE_COLLISION'
-          : (payment.accountingComplete === true ? 'ACCOUNTING_COMPLETE_WITHOUT_JOURNAL' : 'MISSING_JOURNAL')
-      ));
+      if (otherPaymentJournal) {
+        findings.push(gap(payment, 'receipt journal belongs to another payment', 'JOURNAL_REFERENCE_COLLISION'));
+      } else if (payment.accountingComplete === true) {
+        findings.push(gap(payment, 'accounting journal', 'ACCOUNTING_COMPLETE_WITHOUT_JOURNAL'));
+      } else {
+        const actual = await loadAccountingActualSnapshot(payment);
+        const ownerExpected = money(payment.commissionDetails?.ownerAmount) > 0;
+        const agentExpected = money(payment.commissionDetails?.agentShare) > 0;
+        const companyExpected = money(payment.commissionDetails?.agencyShare) > 0;
+        const ownerMissing = ownerExpected && !actual.ownerIncome;
+        const agentMissing = agentExpected && !actual.agentCommission;
+        const companyMissing = companyExpected && !actual.companyCommission;
+        const period = `${payment.rentalPeriodYear || '?'}-${payment.rentalPeriodMonth || '?'}`;
+        const reference = String(payment.referenceNumber || paymentId);
+        if (ownerMissing || agentMissing || companyMissing) {
+          const parts = [
+            `Rental receipt exists`,
+            `reference ${reference}`,
+            `rental period ${period}`,
+            ownerMissing ? 'owner income posting missing' : '',
+            agentMissing ? 'agent commission posting missing' : '',
+            companyMissing ? 'company commission posting missing' : '',
+            'receipt journal missing'
+          ].filter(Boolean);
+          findings.push(gap(payment, parts.join('; '), 'UNPOSTED_RENTAL'));
+        } else if (payment.accountingComplete == null && !payment.accountingStatus) {
+          const zeroNote = legitimateZeroOwnerIncome(payment)
+            ? ' Owner income is not applicable because the stored snapshot calculates zero.'
+            : '';
+          findings.push(gap(payment, `historical receipt journal${zeroNote}`, 'HISTORICAL_JOURNAL_GAP'));
+        } else {
+          findings.push(gap(payment, 'accounting journal', 'MISSING_JOURNAL'));
+        }
+      }
     }
     if (vat > 0 && !vatByPayment.get(paymentId) && activeObligations.length > 0) {
       findings.push(gap(payment, 'VAT collection record', 'VAT_COLLECTION_WITHOUT_RECORD'));
     }
     if (vat > 0 && activeObligations.length === 0 && !originalObligations.some((row) => row.status === 'REVERSED')) {
-      findings.push(gap(payment, 'VAT tax obligation', 'MISSING_TAX_OBLIGATION'));
+      const obligationGap = gap(payment, 'VAT tax obligation', 'MISSING_TAX_OBLIGATION');
+      obligationGap.amount = vat;
+      findings.push(obligationGap);
     }
     if (originalObligations.length > 1) {
       findings.push(gap(payment, 'original VAT tax obligation', 'DUPLICATE_ORIGINAL_OBLIGATION'));
@@ -145,9 +176,9 @@ async function inspectFinancialPostingGaps(companyId: string, limit = 200): Prom
     const tracked = payment.accountingComplete != null || Boolean(payment.accountingStatus);
     if (tracked && policy.allowed && !policy.skipOwnerIncome && money(payment.amount) > 0) {
       const ownerAmount = money(payment.commissionDetails?.ownerAmount);
-      if (ownerAmount <= 0) {
+      if (ownerAmount <= 0 && !legitimateZeroOwnerIncome(payment)) {
         findings.push(gap(payment, 'owner income amount', 'OWNER_INCOME_AMOUNT_MISSING'));
-      } else {
+      } else if (ownerAmount > 0) {
         const income = await PropertyAccount.findOne({
           'transactions.idempotencyKey': `payment:${paymentId}`
         }).select('_id').lean();

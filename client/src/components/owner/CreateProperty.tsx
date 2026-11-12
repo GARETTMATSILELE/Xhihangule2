@@ -73,7 +73,10 @@ const CreateProperty: React.FC = () => {
     } else if (formData.rentalType === 'introduction') {
       defaultCommission = 100;
     }
-    setFormData(prev => ({ ...prev, commission: prev.commission !== undefined && prev.commission !== null && prev.commission !== 0 ? prev.commission : defaultCommission }));
+    setFormData(prev => ({
+      ...prev,
+      commission: prev.commission !== undefined && prev.commission !== null ? prev.commission : defaultCommission
+    }));
     // Only set if not already set by user
     // eslint-disable-next-line
   }, [formData.rentalType, formData.type]);
@@ -212,6 +215,11 @@ const CreateProperty: React.FC = () => {
     // Only validate name and address
     if (!formData.name || !formData.address) {
       setError('Property name and address are required');
+      return;
+    }
+    const commission = Number(formData.commission);
+    if (!Number.isFinite(commission) || commission < 0 || commission > 100) {
+      setError('Commission percentage must be a number from 0 to 100. The payment calculator uses this saved percentage and does not substitute another rate.');
       return;
     }
 
@@ -533,8 +541,8 @@ const CreateProperty: React.FC = () => {
                 inputProps={{ min: 0, max: 100, step: 0.1 }}
                 helperText={
                   formData.rentalType === 'management'
-                    ? (formData.type === 'commercial' ? 'Default: 10% for commercial' : 'Default: 15% for residential')
-                    : 'Default: 100% for introduction'
+                    ? (formData.type === 'commercial' ? 'Saved percentage. Default 10% for commercial until you enter one.' : 'Saved percentage. Default 15% for residential until you enter one.')
+                    : 'Saved percentage of one month\'s rent. A 50% introduction stays 50%. 100% is only the initial default.'
                 }
               />
             </Grid>

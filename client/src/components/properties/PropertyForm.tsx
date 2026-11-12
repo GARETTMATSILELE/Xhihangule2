@@ -132,7 +132,10 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
     } else if (property.rentalType === 'introduction') {
       defaultCommission = 100;
     }
-    setProperty(prev => ({ ...prev, commission: prev.commission !== undefined && prev.commission !== null && prev.commission !== 0 ? prev.commission : defaultCommission }));
+    setProperty(prev => ({
+      ...prev,
+      commission: prev.commission !== undefined && prev.commission !== null ? prev.commission : defaultCommission
+    }));
     // Only set if not already set by user
     // eslint-disable-next-line
   }, [property.rentalType, property.type, individualMode]);
@@ -160,6 +163,14 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
     if (!property.name || !property.address) {
       setError('Name and address are required fields');
       return;
+    }
+
+    if (!individualMode) {
+      const commission = Number(property.commission);
+      if (!Number.isFinite(commission) || commission < 0 || commission > 100) {
+        setError('Commission percentage must be a number from 0 to 100. The payment calculator uses this saved percentage and does not substitute another rate.');
+        return;
+      }
     }
 
     // Log user and company details for debugging
@@ -730,8 +741,8 @@ const PropertyForm: React.FC<PropertyFormProps> = ({ onSubmit, initialData, onCl
                 inputProps={{ min: 0, max: 100, step: 0.1 }}
                 helperText={
                   property.rentalType === 'management'
-                    ? (property.type === 'commercial' ? 'Default: 10% for commercial' : 'Default: 15% for residential')
-                    : 'Default: 100% for introduction'
+                    ? (property.type === 'commercial' ? 'Saved percentage. Default 10% for commercial until you enter one.' : 'Saved percentage. Default 15% for residential until you enter one.')
+                    : 'Saved percentage of one month\'s rent. A 50% introduction stays 50%. 100% is only the initial default.'
                 }
               />
             </Grid>

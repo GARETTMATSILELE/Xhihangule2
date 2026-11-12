@@ -23,6 +23,7 @@ export interface OwnerListSummary {
   outstandingBalance: number;
   pendingMaintenanceCount: number;
   lastActivity: string;
+  createdAt?: string;
 }
 
 export interface OwnersDashboardResponse {

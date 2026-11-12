@@ -22,7 +22,9 @@ import {
 } from '../../types/ownerManagement';
 import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompany } from '../../contexts/CompanyContext';
 import reportingService from '../../reporting/reportingService';
+import { formatCurrency, CurrencyCode } from '../../utils/money';
 
 type OwnerDocumentType = (typeof OWNER_DOCUMENT_TYPES)[number];
 
@@ -42,9 +44,6 @@ const KpiCard = ({ title, value }: { title: string; value: string }) => (
   </Card>
 );
 
-const fmtMoney = (n: number) =>
-  new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0);
-
 const statusColor = (s: string) => {
   if (s === 'Occupied') return 'success';
   if (s === 'Vacant') return 'default';
@@ -58,6 +57,9 @@ const OwnerPortfolioHub: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { impersonate } = useAuth();
+  const { company } = useCompany();
+  const currency = (company?.workspacePreferences?.currency || 'USD') as CurrencyCode;
+  const fmtMoney = (n: number) => formatCurrency(n || 0, currency, { maximumFractionDigits: 0 });
   const ownerService = useAgentPropertyOwnerService();
 
   const [tab, setTab] = useState(0);
@@ -168,6 +170,7 @@ const OwnerPortfolioHub: React.FC = () => {
 
   const saveProfile = async () => {
     if (!ownerId) return;
+    try {
     await ownerManagementService.patchProfile(ownerId, {
       firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone,
       nationalId: form.nationalId, passportNumber: form.passportNumber, taxNumber: form.taxNumber, address: form.address,
@@ -187,6 +190,9 @@ const OwnerPortfolioHub: React.FC = () => {
     });
     setEditOpen(false);
     load();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || err.message || 'Failed to save owner profile');
+    }
   };
 
   const uploadDocument = async () => {

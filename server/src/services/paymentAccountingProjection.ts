@@ -6,6 +6,7 @@ import {
 import { computeOwnerIncomeAmount } from './paymentAccountingCompleteness';
 import { projectCommissionLanes } from './commissionProjection';
 import { moneyAmountsMatch, moneyDifference, roundMoney } from '../utils/money';
+import { receiptExplainedByCommissionSnapshot } from './accountingIntegrityClassification';
 
 export type AccountingComponent =
   | 'ownerIncome'
@@ -201,12 +202,15 @@ export function buildExpectedAccountingProjection(payment: any): ExpectedAccount
   amounts.journal = amount;
   amounts.vat = vatAmountOnPayment(payment);
 
+  const explainedZeroOwner = amount > 0
+    && computedIncome <= 0
+    && receiptExplainedByCommissionSnapshot(payment);
   return {
     policyAllowed: true,
     reason: policy.reason,
-    // Positive cash with a zero owner share is not fully accounted.
-    // Do not invent an income row; leave the component missing.
-    ownerIncome: !policy.skipOwnerIncome && amount > 0,
+    // A snapshot that calculates zero owner income is not an expected income row.
+    // Cash that is not explained by the snapshot still requires owner income.
+    ownerIncome: !policy.skipOwnerIncome && amount > 0 && !explainedZeroOwner,
     agentCommission: !policy.skipAgentCommission && agentAmount > 0,
     companyCommission: !policy.skipCompanyCommission && agencyShare > 0,
     journal: journalExpected,

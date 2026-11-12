@@ -59,6 +59,7 @@ function introSnapshot(rentAllocated: number, alreadyConsumed: number, levyAlloc
     alreadyConsumed
   });
   const calculated = snapshotFromIntroductionAllocation(allocation, {
+    commissionPercentage: 100,
     vatOnCommission: Boolean(vat?.vatOnCommission),
     vatTreatment: vat?.vatOnCommission ? 'inclusive' : undefined,
     vatRate: vat?.vatRate,

@@ -19,13 +19,14 @@ import {
   ReversalProgress
 } from './ledgerEventStateMachine';
 import { AccountingException } from '../models/AccountingException';
-import { isPermanentAccountingFailure, mayPostSaleTrust, OwnerIncomeAmountMissingError } from './transactionDomain';
+import { isPermanentAccountingFailure, mayPostSaleTrust, OwnerIncomeAmountMissingError, OwnerIncomeNotApplicableError } from './transactionDomain';
 import { reversePaymentTaxObligations } from './taxObligationService';
 import { throwOnceIfArmed } from './testFailureSeam';
 import trustPaymentPostingService from './trustPaymentPostingService';
 import { classifyOperationalFailure } from './operationalFailure';
 import { signalOperationalFailure } from './operationalSignal';
 import { upsertFinancialReview } from './financialOperationVisibility';
+import { assessVatPayableJournal, HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED } from './vatPolicyService';
 
 export type AccountingArtifactResult = 'posted' | 'reversed' | 'skipped' | 'failed' | 'absent' | 'already_applied';
 
@@ -35,6 +36,7 @@ export type PaymentPostingResult = {
   reason?: string;
   artifacts: Record<string, AccountingArtifactResult>;
   errors: string[];
+  vatObligationSkipped?: string;
 };
 
 export type PaymentReversalResult = {
@@ -164,10 +166,11 @@ function asState(value: AccountingArtifactResult): ReversalProgress[keyof Revers
  */
 export async function postPaymentAccounting(
   paymentId: string,
-  opts?: { createdBy?: string }
+  opts?: { createdBy?: string; approveHistoricalVatObligation?: boolean }
 ): Promise<PaymentPostingResult> {
   const errors: string[] = [];
   const artifacts: Record<string, AccountingArtifactResult> = {};
+  let vatObligationSkipped: string | undefined;
   const payment = await Payment.findById(paymentId);
   if (!payment) {
     return { paymentId, status: 'failed', reason: 'missing_payment', artifacts, errors: ['Payment not found'] };
@@ -193,12 +196,39 @@ export async function postPaymentAccounting(
     };
   }
 
+  const snapshotVat = Number((payment.commissionDetails as any)?.vatOnCommission ?? (payment.commissionDetails as any)?.vatAmount ?? 0);
+  if (snapshotVat > 0.005) {
+    const journalVat = await assessVatPayableJournal({
+      payment,
+      approveHistoricalVatObligation: opts?.approveHistoricalVatObligation === true
+    });
+    if (!journalVat.recognise) {
+      return {
+        paymentId,
+        status: 'skipped',
+        reason: HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED,
+        artifacts: {
+          ownerIncome: 'skipped',
+          agentCommission: 'skipped',
+          companyCommission: 'skipped',
+          journal: 'skipped',
+          vatObligation: 'skipped'
+        },
+        errors: [],
+        vatObligationSkipped: journalVat.reason
+      };
+    }
+  }
+
   if (!policy.skipOwnerIncome) {
     try {
       throwOnceIfArmed(paymentId, String((payment as any).notes || ''), 'PHASE_FAIL_OWNER_INCOME');
       await propertyAccountService.recordIncomeFromPayment(paymentId);
       artifacts.ownerIncome = 'posted';
     } catch (e: any) {
+      if (e instanceof OwnerIncomeNotApplicableError || e?.code === 'OWNER_INCOME_NOT_APPLICABLE') {
+        artifacts.ownerIncome = 'skipped';
+      } else {
       artifacts.ownerIncome = 'failed';
       errors.push(`ownerIncome: ${e?.message || e}`);
       if (e instanceof OwnerIncomeAmountMissingError || e?.code === 'OWNER_INCOME_AMOUNT_MISSING') {
@@ -217,6 +247,7 @@ export async function postPaymentAccounting(
         } catch (enqueueErr: any) {
           errors.push(`ownerIncome.enqueue: ${enqueueErr?.message || enqueueErr}`);
         }
+      }
       }
     }
   } else {
@@ -272,7 +303,14 @@ export async function postPaymentAccounting(
         journalSeams.add(journalSeamKey);
         throw new Error('PHASE26_FAIL_JOURNAL');
       }
-      const journalResult = await accountingIntegrationService.syncPaymentReceived(payment as any, { createdBy: opts?.createdBy });
+      const journalResult = await accountingIntegrationService.syncPaymentReceived(payment as any, {
+        createdBy: opts?.createdBy,
+        approveHistoricalVatObligation: opts?.approveHistoricalVatObligation === true
+      });
+      if (journalResult.vatObligationSkipped) {
+        artifacts.vatObligation = 'skipped';
+        vatObligationSkipped = journalResult.vatObligationSkipped;
+      }
       if (journalResult.receiptJournal === 'posted') {
         artifacts.journal = 'posted';
       } else if (journalResult.reason === 'zero_amount') {
@@ -311,7 +349,14 @@ export async function postPaymentAccounting(
   if ((company as any)?.workspaceType === 'individual' || (company as any)?.plan === 'INDIVIDUAL') {
     await individualTaxMetadataService.safeAttachForPayment(paymentId);
   }
-  return { paymentId, status, artifacts, errors, reason: policy.reason };
+  return {
+    paymentId,
+    status,
+    artifacts,
+    errors,
+    reason: policy.reason,
+    vatObligationSkipped
+  };
 }
 
 /**

@@ -101,6 +101,7 @@ export type ProviderPoll = {
   currency?: string;
   reference?: string;
   paynowReference?: string;
+  origin?: 'webhook' | 'verified_poll';
 };
 
 export type ProviderPollDecision =
@@ -358,6 +359,47 @@ export function evaluatePaynowDeployment(
     resultPath: result?.pathname || '',
     returnPath: returning?.pathname || ''
   };
+}
+
+export const PAYNOW_RECOVERY_MAX_ATTEMPTS = 8;
+export const PAYNOW_RECOVERY_INTERVAL_MS = 2 * 60 * 1000;
+export const PAYNOW_RECOVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function paynowRecoveryDecision(
+  session: {
+    status?: string;
+    pollUrl?: string;
+    createdAt?: Date | string;
+    metadata?: unknown;
+  },
+  now: Date = new Date()
+): { action: 'poll' } | { action: 'skip'; reason: string } {
+  if (session.status !== 'provider_created') return { action: 'skip', reason: 'not_pending' };
+  if (!session.pollUrl || !isAllowedPaynowPollUrl(session.pollUrl)) return { action: 'skip', reason: 'poll_url_not_allowed' };
+  if (officialPaynowTestAlreadyVerified(session.metadata)) return { action: 'skip', reason: 'test_already_verified' };
+  const created = session.createdAt ? new Date(session.createdAt).getTime() : now.getTime();
+  if (!Number.isFinite(created) || now.getTime() - created > PAYNOW_RECOVERY_MAX_AGE_MS) {
+    return { action: 'skip', reason: 'too_old' };
+  }
+  const recovery = session.metadata && typeof session.metadata === 'object'
+    ? (session.metadata as { paynowRecovery?: { attempts?: unknown; lastAttemptAt?: unknown } }).paynowRecovery
+    : undefined;
+  const attempts = Number(recovery?.attempts || 0);
+  if (attempts >= PAYNOW_RECOVERY_MAX_ATTEMPTS) return { action: 'skip', reason: 'attempts_exhausted' };
+  const last = recovery?.lastAttemptAt ? new Date(String(recovery.lastAttemptAt)).getTime() : 0;
+  if (last && now.getTime() - last < PAYNOW_RECOVERY_INTERVAL_MS) return { action: 'skip', reason: 'too_soon' };
+  return { action: 'poll' };
+}
+
+/** A session explicitly marked for Paynow's official simulated test. Ordinary checkouts are not marked. */
+export function isOfficialPaynowTestSession(metadata: unknown): boolean {
+  return Boolean(metadata && typeof metadata === 'object' && (metadata as { officialPaynowTest?: unknown }).officialPaynowTest === true);
+}
+
+export function officialPaynowTestAlreadyVerified(metadata: unknown): boolean {
+  if (!isOfficialPaynowTestSession(metadata)) return false;
+  const result = (metadata as { officialPaynowTestResult?: { verified?: unknown } }).officialPaynowTestResult;
+  return result?.verified === true;
 }
 
 /** A checkout stamped test or live can be completed only while the server is still in that mode. */

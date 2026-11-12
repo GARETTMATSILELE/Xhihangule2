@@ -18,6 +18,7 @@ export type TaxObligationRow = {
   taxType: string;
   propertyId?: string | null;
   propertyName?: string | null;
+  propertyAddress?: string | null;
   paymentId?: string | null;
   taxPeriod: string;
   taxAmount: number;
@@ -40,6 +41,7 @@ export type LegacyTaxRow = {
   taxType: string;
   propertyId?: string | null;
   propertyName?: string | null;
+  propertyAddress?: string | null;
   amount: number;
   createdAt?: Date | string | null;
 };
@@ -69,6 +71,7 @@ export type TaxLine = {
 export type PropertyTaxBalance = {
   propertyId: string;
   propertyName: string;
+  propertyAddress: string;
   recognised: number;
   paid: number;
   outstanding: number;
@@ -222,6 +225,7 @@ export function buildTaxPosition(input: TaxPositionInput): TaxPosition {
   type Bucket = {
     propertyId: string;
     propertyName: string;
+    propertyAddress: string;
     recognised: number;
     paid: number;
     outstanding: number;
@@ -229,22 +233,33 @@ export function buildTaxPosition(input: TaxPositionInput): TaxPosition {
     lines: TaxLine[];
   };
   const buckets = new Map<string, Map<string, Bucket>>();
-  const ensure = (taxType: string, propertyId: string, propertyName: string): Bucket => {
+  const ensure = (taxType: string, propertyId: string, propertyName: string, propertyAddress?: string | null): Bucket => {
     if (!buckets.has(taxType)) buckets.set(taxType, new Map());
     const byProperty = buckets.get(taxType)!;
     const existing = byProperty.get(propertyId);
+    const address = String(propertyAddress || '').trim();
     if (existing) {
       if (existing.propertyName === propertyId && propertyName && propertyName !== propertyId) existing.propertyName = propertyName;
+      if (!existing.propertyAddress && address) existing.propertyAddress = address;
       return existing;
     }
-    const created: Bucket = { propertyId, propertyName: propertyName || propertyId, recognised: 0, paid: 0, outstanding: 0, reversed: 0, lines: [] };
+    const created: Bucket = {
+      propertyId,
+      propertyName: propertyName || propertyId,
+      propertyAddress: address,
+      recognised: 0,
+      paid: 0,
+      outstanding: 0,
+      reversed: 0,
+      lines: []
+    };
     byProperty.set(propertyId, created);
     return created;
   };
 
   for (const row of obligations) {
     const key = propertyKey(row.propertyId);
-    const bucket = ensure(row.taxType, key, row.propertyName || key);
+    const bucket = ensure(row.taxType, key, row.propertyName || key, row.propertyAddress);
     if (!isActiveObligation(row)) {
       if (String(row.status) === 'REVERSED' && !row.reversalOf) {
         bucket.reversed = round(bucket.reversed + round(row.taxAmount));
@@ -278,7 +293,7 @@ export function buildTaxPosition(input: TaxPositionInput): TaxPosition {
       const taxType = canonicalOfLegacy(row.taxType);
       const key = `${taxType}|${propertyKey(row.propertyId)}`;
       target.set(key, round((target.get(key) || 0) + round(row.amount)));
-      ensure(taxType, propertyKey(row.propertyId), row.propertyName || propertyKey(row.propertyId));
+      ensure(taxType, propertyKey(row.propertyId), row.propertyName || propertyKey(row.propertyId), row.propertyAddress);
     }
   };
   addLegacy(input.legacyRecords, legacyRecognised);

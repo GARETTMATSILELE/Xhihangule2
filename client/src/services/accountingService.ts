@@ -177,6 +177,10 @@ export interface AccountingIntegritySummary {
   orphaned: number;
   exceptions: number;
   orphanScanWindowHours?: number;
+  historicalUnjournalledReceipts?: number;
+  historicalJournalGaps?: number;
+  unpostedRentals?: number;
+  vatConfigurationReviews?: number;
 }
 
 export interface AccountingIntegrityRow {
@@ -193,6 +197,10 @@ export interface AccountingIntegrityRow {
   actual: string | number;
   difference: string | number;
   status: 'MISSING' | 'MISMATCHED' | 'ORPHANED' | string;
+  classification?: string;
+  explanation?: string;
+  ownerIncomeDisposition?: string;
+  commercialArrangement?: string;
   accountingComplete?: boolean;
   canRepair?: boolean;
   amount?: number;
@@ -323,12 +331,33 @@ const accountingService = {
     const res = await api.post(`/accountants/payments/${paymentId}/accounting/repair`, payload);
     return res.data;
   },
+  async getHistoricalVatSchedule(): Promise<{ rows: any[]; counts: Record<string, number>; totalVat: number; automaticRecognition: boolean }> {
+    const res = await api.get('/accountants/historical-vat/schedule');
+    return res.data;
+  },
+  async recogniseHistoricalVat(paymentId: string, payload: {
+    confirm: boolean;
+    reason: string;
+    physicalBookReference: string;
+    septemberTaxTreatmentApproved?: boolean;
+    taxTreatmentBasis?: string;
+  }): Promise<any> {
+    const res = await api.post(`/accountants/historical-vat/${paymentId}/recognise`, payload);
+    return res.data;
+  },
+  async rejectHistoricalVat(paymentId: string, payload: { reason: string }): Promise<any> {
+    const res = await api.post(`/accountants/historical-vat/${paymentId}/reject`, payload);
+    return res.data;
+  },
   async getTaxComplianceDashboard(): Promise<TaxComplianceDashboard> {
     const res = await api.get('/accounting/tax-compliance');
     return res.data?.data;
   },
-  async getTaxPosition(asOf?: string): Promise<any> {
-    const res = await api.get('/accounting/tax-position', { params: asOf ? { asOf } : undefined });
+  async getTaxPosition(asOf?: string, taxPeriod?: string): Promise<any> {
+    const params: Record<string, string> = {};
+    if (asOf) params.asOf = asOf;
+    if (taxPeriod) params.taxPeriod = taxPeriod;
+    const res = await api.get('/accounting/tax-position', { params });
     return res.data?.data;
   },
   async getTaxObligations(params?: { taxType?: string; period?: string }): Promise<any[]> {

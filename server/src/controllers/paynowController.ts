@@ -214,6 +214,16 @@ export async function initiatePaynowCheckout(req: Request, input: {
 		? String(session.providerRef).trim()
 		: `SUBS-${session._id.toString()}`;
 
+	const officialTestEmail = String(process.env.PAYNOW_OFFICIAL_TEST_EMAIL || '').trim().toLowerCase();
+	const officialPaynowTest = process.env.PAYNOW_OFFICIAL_TEST_CHECKOUT === '1'
+		&& officialTestEmail.length > 0
+		&& email.trim().toLowerCase() === officialTestEmail;
+	if (officialPaynowTest && (session.metadata as { officialPaynowTest?: unknown } | undefined)?.officialPaynowTest !== true) {
+		session.metadata = { ...(session.metadata || {}), officialPaynowTest: true };
+		session.markModified('metadata');
+		await session.save();
+	}
+
 	const requestHost = paynowRequestHost(req.headers);
 	paynowLog('info', 'paynow_checkout_started', {
 		correlationId: ref,
@@ -222,7 +232,8 @@ export async function initiatePaynowCheckout(req: Request, input: {
 		amount: priced,
 		currency: 'USD',
 		mode: paynowConfigurationState().mode,
-		testTransaction: paynowConfigurationState().mode === 'test'
+		testTransaction: paynowConfigurationState().mode === 'test',
+		officialPaynowTest
 	});
 	let deployment: ReturnType<typeof deploymentForRequest>;
 	try {
@@ -329,6 +340,16 @@ export async function initiatePaynowCheckout(req: Request, input: {
 		paymentSessionId: String(session._id),
 		amount: priced,
 		currency: 'USD',
+		resultUrl: initiation?.resulturl,
+		returnUrl: initiation?.returnurl,
+		integrationId: initiation?.id,
+		statusField: initiation?.status,
+		referenceSent: initiation?.reference,
+		amountSent: initiation?.amount,
+		authEmailSent: Boolean(initiation?.authemail),
+		fieldOrder: initiation ? Object.keys(initiation).filter((name) => name.toLowerCase() !== 'hash') : undefined,
+		hashPrefix: initiation?.hash ? String(initiation.hash).slice(0, 6) : undefined,
+		officialPaynowTest: (session.metadata as { officialPaynowTest?: unknown } | undefined)?.officialPaynowTest === true,
 		paynowReference: String((session.rawProviderResponse as { paynowReference?: string } | undefined)?.paynowReference || '') || undefined
 	});
 
@@ -452,7 +473,8 @@ async function confirmSessionPayment(req: Request, reference: string, verifiedPo
 		amount: polled.parsed?.amount,
 		currency: polled.fields?.currency || polled.fields?.Currency,
 		reference: polled.parsed?.reference,
-		paynowReference: polled.parsed?.paynowReference
+		paynowReference: polled.parsed?.paynowReference,
+		origin: 'webhook'
 	});
 	if (applied.activated === true) {
 		paynowLog('info', 'paynow_subscription_activated', { correlationId: reference, reference });
@@ -641,6 +663,9 @@ export async function handleResult(req: Request, res: Response) {
 		paynowLog('info', 'paynow_result_received', {
 			correlationId: reference || 'paynow',
 			reference: reference || undefined,
+			method: req.method,
+			path: req.path,
+			contentType: req.headers['content-type'],
 			hasHash: Boolean(payload.hash || payload.Hash)
 		});
 		if (!verifyPaynowPayload(payload, env.INTEGRATION_KEY)) {

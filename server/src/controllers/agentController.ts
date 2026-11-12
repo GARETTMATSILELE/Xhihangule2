@@ -18,13 +18,18 @@ import { ensureLeaseInspectionSchedule } from '../services/inspectionAutomationS
 import { sanitizePropertyVatSettings } from '../services/propertyCommissionCalculator';
 import { CommissionService, applyLevyPassThroughToSnapshot } from '../services/commissionService';
 import { centralVatRateBlock, commissionVatFlagsFromPolicy, resolveCommissionVatPolicy, stampVatDecision } from '../services/vatPolicyService';
+import { resolveStoredCommissionPercentage } from '../services/commissionRateResolution';
 import { openReview } from '../services/taxObligationService';
 import { initialAccountingIntegrityFields, ensureDepositLedgerFromPayment } from '../services/paymentAccountingReconciliation';
 import { COMPLETED_PAYMENT_IMMUTABLE_MESSAGE, assertCompletedPaymentFinanciallyImmutable } from '../services/paymentFinancialImmutability';
 import { prepareIntroductionRentalCommission } from '../services/introductionCommissionService';
 import { introductionContextErrorResponse } from '../services/introductionLeaseContext';
 import { salePaymentIncompleteResponse, validateSalePaymentCompleteness } from '../services/salePaymentCompleteness';
-import { callerCanAccessProperty, callerCanMutatePropertyOwner, callerCanReadPropertyOwner, planOwnerPropertyAssignment, propertyIdsForCaller } from '../utils/propertyAccess';
+import { callerCanAccessProperty, callerCanMutatePropertyOwner, callerCanReadPropertyOwner, propertyIdsForCaller, propertyOwnerIdsForCaller } from '../utils/propertyAccess';
+import { validateNewPropertyOwner, validateOwnerContact, normalizeOwnerEmail } from '../services/propertyOwnerGuards';
+import { commitOwnerPropertyLinks, validateOwnerPropertyAssignment } from '../services/ownerPropertyLinkService';
+import { retirePropertyOwner, syncOwnerPortalProfile } from '../services/ownerRetirementService';
+import { provisionOwnerPortalUser } from '../services/ownerPortalUser';
 import { hasAnyRole } from '../utils/access';
 import { safeAttachmentFilename } from '../utils/contentDisposition';
 
@@ -33,11 +38,12 @@ async function visiblePropertyIdList(req: Request): Promise<mongoose.Types.Objec
   return ids === 'company' ? null : ids;
 }
 
-async function propertiesAreVisible(req: Request, propertyIds: string[]): Promise<boolean> {
-  for (const id of propertyIds) {
-    if (!(await callerCanAccessProperty(req, String(id)))) return false;
-  }
-  return true;
+function ownerResponseForCaller(owner: any, visiblePropertyIds: mongoose.Types.ObjectId[] | null) {
+  const plain = typeof owner?.toObject === 'function' ? owner.toObject() : { ...owner };
+  if (!visiblePropertyIds) return plain;
+  const allowed = new Set(visiblePropertyIds.map(String));
+  plain.properties = (plain.properties || []).filter((property: any) => allowed.has(String(property?._id || property)));
+  return plain;
 }
 
 const activePropertyVisibilityFilter = {
@@ -119,25 +125,13 @@ export const getAgentPropertyOwnerById = async (req: Request, res: Response) => 
     const owner = await PropertyOwner.findOne({
       _id: new mongoose.Types.ObjectId(id),
       companyId: new mongoose.Types.ObjectId(req.user.companyId)
-    }).populate('properties', 'name address');
+    }).select('-password -tokens').populate('properties', 'name address');
 
-    if (!owner) {
+    if (!owner || !(await callerCanReadPropertyOwner(req, String(owner._id)))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
-    const visible = await visiblePropertyIdList(req);
-    if (visible) {
-      const linked = (owner.properties || []).some((id: any) => visible.some((row) => String(row) === String(id?._id || id)));
-      const byField = await Property.exists({
-        _id: { $in: visible },
-        propertyOwnerId: owner._id,
-        companyId: req.user.companyId,
-      });
-      if (!linked && !byField) {
-        return res.status(404).json({ message: 'Property owner not found' });
-      }
-    }
 
-    res.json(owner);
+    res.json(ownerResponseForCaller(owner, await visiblePropertyIdList(req)));
   } catch (error) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({ message: error.message });
@@ -1145,7 +1139,11 @@ export const createAgentPayment = async (req: Request, res: Response) => {
 
     const commissionBaseAmount = combinedAllocation ? combinedAllocation.rentAllocated : numericAmount;
     const levyAllocated = Number(combinedAllocation?.levyAllocated || 0);
-    const commissionPercentage = Number(property.commission || 0);
+    const resolvedCommissionRate = resolveStoredCommissionPercentage((property as any).commission);
+    if (!resolvedCommissionRate.ok && (property as any).commission != null && (property as any).commission !== '') {
+      return res.status(400).json({ status: 'error', code: resolvedCommissionRate.code, message: resolvedCommissionRate.message });
+    }
+    const commissionPercentage = resolvedCommissionRate.ok ? resolvedCommissionRate.percent : Number((property as any).commission || 0);
     const isAgentRentalPayment = resolvedPaymentType !== 'sale';
 
     const propertyVatRequested = Boolean((property as any)?.vatOnCommission);
@@ -1189,6 +1187,7 @@ export const createAgentPayment = async (req: Request, res: Response) => {
           leaseId,
           rentAllocated: isDepositOnly ? 0 : commissionBaseAmount,
           levyAllocated: isDepositOnly ? 0 : levyAllocated,
+          commissionPercentage: (property as any).commission,
           vatOnCommission: commissionVat.vatOnCommission,
           vatTreatment: commissionVat.vatTreatment,
           vatRate: commissionVat.vatRate,
@@ -1483,6 +1482,7 @@ export const updateAgentPayment = async (req: Request, res: Response) => {
             leaseId: updateData.leaseId || (payment as any).leaseId,
             rentAllocated,
             levyAllocated,
+            commissionPercentage: (linkedProperty as any)?.commission,
             vatOnCommission: commissionVat.vatOnCommission,
             vatTreatment: commissionVat.vatTreatment,
             vatRate: commissionVat.vatRate,
@@ -1727,22 +1727,12 @@ export const getAgentPropertyOwners = async (req: Request, res: Response) => {
       });
     }
 
-    const visible = await visiblePropertyIdList(req);
+    const visibleOwners = await propertyOwnerIdsForCaller(req);
     const ownerQuery: any = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
-    if (visible) {
-      const linkedOwnerIds = await Property.find({
-        _id: { $in: visible },
-        companyId: req.user.companyId,
-        propertyOwnerId: { $exists: true },
-      }).distinct('propertyOwnerId');
-      ownerQuery.$or = [
-        { properties: { $in: visible } },
-        { _id: { $in: linkedOwnerIds } },
-      ];
-    }
-    const owners = await PropertyOwner.find(ownerQuery).populate('properties', 'name address');
-
-    res.json({ owners });
+    if (visibleOwners !== 'company') ownerQuery._id = { $in: visibleOwners };
+    const owners = await PropertyOwner.find(ownerQuery).select('-password -tokens').populate('properties', 'name address');
+    const visibleProperties = await visiblePropertyIdList(req);
+    res.json({ owners: owners.map((owner) => ownerResponseForCaller(owner, visibleProperties)) });
   } catch (error) {
     if (error instanceof AppError) {
       throw error;
@@ -1762,69 +1752,59 @@ export const createAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
     }
 
-    // Only allow agents
-    if (req.user.role !== 'agent') {
+    if (!hasAnyRole(req, ['agent', 'sales'])) {
       return res.status(403).json({ message: 'Only agents can create property owners via this endpoint.' });
     }
 
     const { email, password, firstName, lastName, phone, propertyIds } = req.body;
+    const invalid = validateNewPropertyOwner({ email, password, firstName, lastName, phone });
+    if (invalid) return res.status(400).json({ message: invalid });
 
-    // Validate required fields
-    if (!email || !password || !firstName || !lastName || !phone) {
-      return res.status(400).json({ message: 'All fields are required' });
-    }
-
-    // Check if owner already exists
-    const existingOwner = await PropertyOwner.findOne({ email });
+    const normalizedEmail = normalizeOwnerEmail(email);
+    const existingOwner = await PropertyOwner.findOne({
+      email: normalizedEmail,
+      companyId: req.user.companyId,
+    });
     if (existingOwner) {
       return res.status(400).json({ message: 'Property owner with this email already exists' });
     }
 
-    if (propertyIds && propertyIds.length > 0 && !(await propertiesAreVisible(req, propertyIds))) {
-      return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
-    }
+    const requestedPropertyIds = Array.isArray(propertyIds) ? propertyIds : [];
+    const assignment = requestedPropertyIds.length
+      ? await validateOwnerPropertyAssignment(req, null, [], requestedPropertyIds)
+      : { properties: [] as string[], selectedByCaller: [] as string[], removed: [] as string[] };
 
-    const ownerData = {
-      email,
+    const owner = new PropertyOwner({
+      email: normalizedEmail,
       password,
-      firstName,
-      lastName,
-      phone,
+      firstName: String(firstName).trim(),
+      lastName: String(lastName).trim(),
+      phone: String(phone).trim(),
       companyId: req.user.companyId,
-      properties: propertyIds || []
-    };
-
-    const owner = new PropertyOwner(ownerData);
+      properties: assignment.properties,
+    });
     await owner.save();
-
-    // Also create a corresponding user with role 'owner' if not already present
-    try {
-      const existingUser = await User.findOne({ 
-        email: owner.email, 
-        companyId: new mongoose.Types.ObjectId(req.user.companyId) 
-      });
-      if (!existingUser) {
-        const newUser = new User({
-          email: owner.email,
-          password: password, // Will be hashed by User pre-save hook
-          firstName: owner.firstName,
-          lastName: owner.lastName,
-          role: 'owner',
-          companyId: new mongoose.Types.ObjectId(req.user.companyId),
-          isActive: true
-        });
-        await newUser.save();
-      }
-    } catch (userError) {
-      console.error('Error creating corresponding user for property owner:', userError);
-      // Do not fail the main request if user creation fails; property owner was created successfully
+    if (assignment.properties.length) {
+      await commitOwnerPropertyLinks(req.user.companyId, owner._id, assignment);
     }
 
-    // Note: Do not modify Property.ownerId here. ownerId refers to the agent (User) who owns the property.
-    // The association between PropertyOwner and properties is maintained via PropertyOwner.properties only.
+    const portal = await provisionOwnerPortalUser({
+      email: owner.email,
+      password,
+      firstName: owner.firstName,
+      lastName: owner.lastName,
+      companyId: req.user.companyId,
+    });
 
-    res.status(201).json(owner);
+    res.status(201).json({
+      ...owner.toJSON(),
+      portalAccess: portal.portalAccess,
+      portalMessage: portal.portalMessage,
+    });
   } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     console.error('Error creating agent property owner:', error);
     res.status(500).json({ message: 'Error creating property owner' });
   }
@@ -1865,86 +1845,59 @@ export const updateAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
+    const contactError = validateOwnerContact({ email, phone });
+    if (contactError) return res.status(400).json({ message: contactError });
+
     const updateData: any = {};
-    if (firstName) updateData.firstName = firstName;
-    if (lastName) updateData.lastName = lastName;
-    if (email) updateData.email = email;
-    if (phone) updateData.phone = phone;
+    if (typeof firstName === 'string' && firstName.trim()) updateData.firstName = firstName.trim();
+    if (typeof lastName === 'string' && lastName.trim()) updateData.lastName = lastName.trim();
+    if (typeof email === 'string' && email.trim()) updateData.email = normalizeOwnerEmail(email);
+    if (typeof phone === 'string' && phone.trim()) updateData.phone = phone.trim();
 
-    let removedPropertyIds: string[] = [];
-    let selectedByCaller: string[] = [];
+    if (updateData.email) {
+      const duplicate = await PropertyOwner.findOne({
+        email: updateData.email,
+        companyId,
+        _id: { $ne: owner._id },
+      }).select('_id');
+      if (duplicate) return res.status(400).json({ message: 'Property owner with this email already exists' });
+    }
+
+    let assignment: { properties: string[]; selectedByCaller: string[]; removed: string[] } | null = null;
     if (assigningProperties) {
-      const requestedIds = propertyIds.map((propertyId: unknown) => String(propertyId));
-      if (requestedIds.some((propertyId: string) => !mongoose.Types.ObjectId.isValid(propertyId))) {
-        return res.status(400).json({ message: 'One or more property IDs are invalid.' });
-      }
-
-      const accessible = await propertyIdsForCaller(req);
-      const assignment = planOwnerPropertyAssignment(
+      assignment = await validateOwnerPropertyAssignment(
+        req,
+        String(owner._id),
         (owner.properties || []).map((propertyId) => String(propertyId)),
-        requestedIds,
-        accessible === 'company' ? 'company' : accessible.map(String),
+        propertyIds,
       );
-      if (assignment.rejected.length > 0) {
-        return res.status(403).json({ message: 'All properties must belong to your authorized portfolio.' });
-      }
-
-      const accessibleRequested = assignment.properties.filter(
-        (propertyId) => accessible === 'company' || accessible.some((row) => String(row) === propertyId)
-      );
-      if (accessibleRequested.length > 0) {
-        const companyProperties = await Property.find({
-          _id: { $in: accessibleRequested.map((propertyId) => new mongoose.Types.ObjectId(propertyId)) },
-          companyId,
-          isDeleted: { $ne: true },
-        }).select('_id propertyOwnerId');
-
-        if (companyProperties.length !== accessibleRequested.length) {
-          return res.status(403).json({ message: 'All properties must belong to your company.' });
-        }
-        const assignedElsewhere = companyProperties.find((property) =>
-          property.propertyOwnerId && String(property.propertyOwnerId) !== String(owner._id)
-        );
-        if (assignedElsewhere) {
-          return res.status(403).json({ message: 'One or more properties are already assigned to another owner.' });
-        }
-      }
-
       updateData.properties = assignment.properties;
-      selectedByCaller = accessibleRequested;
-      removedPropertyIds = assignment.removed;
     }
 
     const updatedOwner = await PropertyOwner.findByIdAndUpdate(
       id,
       updateData,
       { new: true }
-    );
+    ).select('-password -tokens');
 
-    // Property.ownerId stays the agent User. propertyOwnerId is the landlord link.
-    if (selectedByCaller.length > 0) {
-      await Property.updateMany(
-        {
-          _id: { $in: selectedByCaller.map((propertyId) => new mongoose.Types.ObjectId(propertyId)) },
-          companyId,
-          isDeleted: { $ne: true },
-        },
-        { $set: { propertyOwnerId: owner._id } }
-      );
+    if (assignment) {
+      await commitOwnerPropertyLinks(companyId, owner._id, assignment);
     }
-    if (removedPropertyIds.length > 0) {
-      await Property.updateMany(
-        {
-          _id: { $in: removedPropertyIds.map((propertyId) => new mongoose.Types.ObjectId(propertyId)) },
-          companyId,
-          propertyOwnerId: owner._id,
-        },
-        { $unset: { propertyOwnerId: 1 } }
-      );
+    if (updateData.email || updateData.firstName || updateData.lastName) {
+      await syncOwnerPortalProfile({
+        previousEmail: owner.email,
+        companyId: req.user.companyId,
+        email: updateData.email,
+        firstName: updateData.firstName,
+        lastName: updateData.lastName,
+      });
     }
 
     res.json(updatedOwner);
   } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     console.error('Error updating agent property owner:', error);
     res.status(500).json({ message: 'Error updating property owner' });
   }
@@ -1960,28 +1913,21 @@ export const deleteAgentPropertyOwner = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Company ID not found. Please ensure you are associated with a company.' });
     }
 
-    // Only allow agents
-    if (req.user.role !== 'agent') {
+    if (!hasAnyRole(req, ['agent', 'sales'])) {
       return res.status(403).json({ message: 'Only agents can delete property owners via this endpoint.' });
     }
 
     const { id } = req.params;
-
-    // Find the property owner and ensure it belongs to the agent's company
-    const owner = await PropertyOwner.findOne({ 
-      _id: id, 
-      companyId: new mongoose.Types.ObjectId(req.user.companyId) 
-    });
-
-    if (!owner || !(await callerCanMutatePropertyOwner(req, String(owner._id)))) {
+    if (!(await callerCanMutatePropertyOwner(req, id))) {
       return res.status(404).json({ message: 'Property owner not found' });
     }
 
-    // Delete the property owner
-    await PropertyOwner.findByIdAndDelete(id);
-
-    res.json({ message: 'Property owner deleted successfully' });
+    const result = await retirePropertyOwner(id, req.user.companyId);
+    res.json(result);
   } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     console.error('Error deleting agent property owner:', error);
     res.status(500).json({ message: 'Error deleting property owner' });
   }

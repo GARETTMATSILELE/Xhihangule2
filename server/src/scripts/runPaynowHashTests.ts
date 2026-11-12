@@ -2,7 +2,7 @@
  * Paynow hash and initiation-message tests.
  * Does not call Paynow, does not read merchant keys, and does not write payment records.
  */
-import { paynowConfigurationState, paynowPayloadHash, verifyPaynowPayload } from '../services/registrationPaymentPolicy';
+import { isOfficialPaynowTestSession, officialPaynowTestAlreadyVerified, paynowConfigurationState, paynowPayloadHash, paynowRecoveryDecision, verifyPaynowPayload } from '../services/registrationPaymentPolicy';
 import {
   buildPaynowInitiationFields,
   installCorrectPaynowHashing,
@@ -115,6 +115,26 @@ function main() {
     && links.pollUrl === responseFields.pollurl);
   const tampered = body.replace(/hash=[^&]+/, 'hash=' + 'B'.repeat(128));
   record('invalid response hash is rejected', verifyPaynowPayload(parsePaynowBody(tampered), DOCUMENTED_KEY) === false);
+  record('ordinary sessions are not official Paynow tests', isOfficialPaynowTestSession({ paynowMode: 'live' }) === false && officialPaynowTestAlreadyVerified({}) === false);
+  record('an official test is recorded once',
+    isOfficialPaynowTestSession({ officialPaynowTest: true }) === true
+    && officialPaynowTestAlreadyVerified({ officialPaynowTest: true }) === false
+    && officialPaynowTestAlreadyVerified({ officialPaynowTest: true, officialPaynowTestResult: { verified: true } }) === true);
+  const now = new Date('2026-11-10T12:30:00.000Z');
+  const pending = {
+    status: 'provider_created',
+    pollUrl: 'https://www.paynow.co.zw/Interface/CheckPayment/?guid=example',
+    createdAt: '2026-11-10T12:11:43.495Z',
+    metadata: { officialPaynowTest: true }
+  };
+  record('a pending Paynow session can be polled for recovery', paynowRecoveryDecision(pending, now).action === 'poll');
+  record('a verified official test is not polled again', paynowRecoveryDecision({
+    ...pending,
+    metadata: { officialPaynowTest: true, officialPaynowTestResult: { verified: true } }
+  }, now).action === 'skip');
+  record('completed and exhausted sessions are not polled',
+    paynowRecoveryDecision({ ...pending, status: 'paid' }, now).action === 'skip'
+    && paynowRecoveryDecision({ ...pending, metadata: { paynowRecovery: { attempts: 8 } } }, now).action === 'skip');
 
   const failed = checks.filter((check) => !check.ok);
   console.log(`${checks.length - failed.length}/${checks.length} passed`);

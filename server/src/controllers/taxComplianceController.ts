@@ -1,8 +1,11 @@
+import mongoose from 'mongoose';
 import { NextFunction, Request, Response } from 'express';
 import { TaxObligation } from '../models/TaxObligation';
 import { TaxPayment } from '../models/TaxPayment';
 import { TaxReviewItem } from '../models/TaxReviewItem';
 import { ChartOfAccount } from '../models/ChartOfAccount';
+import { Property } from '../models/Property';
+import { Payment } from '../models/Payment';
 import { prepareVatReturn, updateVatReturnStatus, listVatReturns } from '../services/vatReturnService';
 import { recordZimraPayment, attachTaxPaymentReceipt } from '../services/zimraPaymentService';
 import { buildComplianceMigrationReport } from '../services/taxComplianceReviewService';
@@ -14,14 +17,54 @@ import { GL } from '../services/tax/chartAccounts';
 import { roundMoney } from '../utils/money';
 import { AppError } from '../middleware/errorHandler';
 import { buildTrustReconciliationReport } from '../services/tax/trustReconciliation';
-import { loadCompanyTaxPosition } from '../services/tax/taxPositionRead';
-import { loadNewTaxIntegrity } from '../services/tax/newTaxIntegrityRead';
+import { loadTaxPositionResponse } from '../services/tax/taxDashboardRead';
+import { formatPropertyAddress, presentObligationAmounts, presentObligationProperty, resolveLinkedPropertyId, summariseTaxPayment } from '../services/tax/taxDashboard';
 
 const companyIdOf = (req: Request): string => {
   const id = req.user?.companyId;
   if (!id) throw new AppError('Company ID required', 400);
   return String(id);
 };
+
+async function loadLinkedProperties(
+  companyId: string,
+  links: Array<{ propertyId?: unknown; paymentId?: unknown }>
+) {
+  const paymentIds = links.map((link) => link.paymentId).filter(Boolean);
+  const payments = paymentIds.length
+    ? await Payment.find({ companyId, _id: { $in: paymentIds } }).select('referenceNumber propertyId').lean()
+    : [];
+  const paymentById = new Map(payments.map((row) => [String(row._id), row]));
+  const propertyIds = Array.from(new Set(links.map((link) => {
+    const payment = link.paymentId ? paymentById.get(String(link.paymentId)) : undefined;
+    return resolveLinkedPropertyId({
+      obligationPropertyId: link.propertyId ? String(link.propertyId) : null,
+      paymentPropertyId: payment?.propertyId ? String(payment.propertyId) : null
+    });
+  }).filter((id): id is string => Boolean(id))));
+  const properties = propertyIds.length
+    ? await Property.find({ companyId, _id: { $in: propertyIds } }).select('name address').lean()
+    : [];
+  const propertyById = new Map(properties.map((row) => [String(row._id), row]));
+  const viewFor = (link: { propertyId?: unknown; paymentId?: unknown }) => {
+    const payment = link.paymentId ? paymentById.get(String(link.paymentId)) : undefined;
+    const propertyId = resolveLinkedPropertyId({
+      obligationPropertyId: link.propertyId ? String(link.propertyId) : null,
+      paymentPropertyId: payment?.propertyId ? String(payment.propertyId) : null
+    });
+    const property = propertyId ? propertyById.get(propertyId) : undefined;
+    return {
+      propertyId,
+      payment,
+      ...presentObligationProperty({
+        propertyId,
+        propertyName: property?.name || null,
+        propertyAddress: formatPropertyAddress(property?.address)
+      })
+    };
+  };
+  return { viewFor };
+}
 
 const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
@@ -173,13 +216,17 @@ export const getTaxPosition = asyncHandler(async (req: Request, res: Response) =
       return res.status(400).json({ message: 'asOf must be a valid date' });
     }
   }
-  const position = await loadCompanyTaxPosition(companyIdOf(req), asOf);
-  const newPeriod = await loadNewTaxIntegrity(companyIdOf(req));
-  return res.json({ status: 'success', data: { ...position, newPeriod } });
+  const taxPeriod = req.query.taxPeriod ? String(req.query.taxPeriod).trim() : '';
+  if (taxPeriod && (taxPeriod.length > 32 || /[^\w-]/.test(taxPeriod))) {
+    return res.status(400).json({ message: 'taxPeriod is not a valid filing period' });
+  }
+  const data = await loadTaxPositionResponse(companyIdOf(req), asOf, taxPeriod || undefined);
+  return res.json({ status: 'success', data });
 });
 
 export const listTaxObligations = asyncHandler(async (req: Request, res: Response) => {
   const companyId = companyIdOf(req);
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
   const taxType = req.query.taxType ? String(req.query.taxType) : undefined;
   const period = req.query.period ? String(req.query.period) : undefined;
   const rows = await TaxObligation.find({
@@ -190,14 +237,46 @@ export const listTaxObligations = asyncHandler(async (req: Request, res: Respons
     .sort({ transactionDate: -1 })
     .limit(500)
     .lean();
-  const withOutstanding = [];
-  for (const row of rows) {
-    withOutstanding.push({
-      ...row,
-      outstanding: await outstandingForObligation(String(row._id)),
-      label: TAX_TYPE_LABEL[row.taxType as CanonicalTaxType] || row.taxType
+
+  const obligationIds = rows.map((row) => row._id);
+  const [paidRows, linked] = await Promise.all([
+    obligationIds.length
+      ? TaxPayment.aggregate([
+          { $match: { companyId: companyObjectId, status: 'POSTED', 'allocations.taxObligationId': { $in: obligationIds } } },
+          { $unwind: '$allocations' },
+          { $match: { 'allocations.taxObligationId': { $in: obligationIds } } },
+          { $group: { _id: '$allocations.taxObligationId', total: { $sum: '$allocations.amount' } } }
+        ])
+      : [],
+    loadLinkedProperties(companyId, rows)
+  ]);
+  const paidById = new Map(paidRows.map((row: { _id: unknown; total: number }) => [String(row._id), Number(row.total || 0)]));
+
+  const withOutstanding = rows.map((row) => {
+    const propertyView = linked.viewFor(row);
+    const amounts = presentObligationAmounts({
+      taxType: String(row.taxType),
+      taxAmount: Number(row.taxAmount || 0),
+      status: String(row.status || ''),
+      reversalOf: row.reversalOf ? String(row.reversalOf) : null,
+      allocatedPaid: paidById.get(String(row._id)) || 0
     });
-  }
+    return {
+      ...row,
+      propertyId: propertyView.propertyId || row.propertyId || null,
+      outstanding: amounts.outstanding,
+      amountPaid: amounts.amountPaid,
+      paymentStatus: amounts.paymentStatus,
+      categoryKey: amounts.categoryKey,
+      categoryLabel: amounts.categoryLabel,
+      label: TAX_TYPE_LABEL[row.taxType as CanonicalTaxType] || row.taxType,
+      propertyName: propertyView.propertyAvailable ? propertyView.propertyLabel : null,
+      propertyAddress: propertyView.propertyAddress || null,
+      propertyAvailable: propertyView.propertyAvailable,
+      propertyLabel: propertyView.propertyLabel,
+      sourcePaymentReference: propertyView.payment?.referenceNumber || row.paymentReference || null
+    };
+  });
   return res.json({ status: 'success', data: withOutstanding });
 });
 
@@ -325,10 +404,53 @@ export const getComplianceMigrationReport = asyncHandler(async (req: Request, re
 });
 
 export const listTaxPayments = asyncHandler(async (req: Request, res: Response) => {
-  const rows = await TaxPayment.find({ companyId: companyIdOf(req) })
+  const companyId = companyIdOf(req);
+  const rows = await TaxPayment.find({ companyId })
     .select('-receiptData')
     .sort({ paymentDate: -1 })
     .limit(100)
     .lean();
-  return res.json({ status: 'success', data: rows });
+  const obligationIds = rows.flatMap((row) => (row.allocations || []).map((allocation) => allocation.taxObligationId)).filter(Boolean);
+  const obligations = obligationIds.length
+    ? await TaxObligation.find({ companyId, _id: { $in: obligationIds } }).select('taxType taxPeriod propertyId paymentId').lean()
+    : [];
+  const linked = await loadLinkedProperties(companyId, obligations);
+  const obligationById = new Map(obligations.map((row) => [String(row._id), row]));
+
+  const data = rows.map((row) => {
+    const summary = summariseTaxPayment({
+      status: String(row.status || ''),
+      amount: Number(row.amount || 0),
+      unallocatedAmount: Number(row.unallocatedAmount || 0),
+      allocations: (row.allocations || []).map((allocation) => ({
+        amount: Number(allocation.amount || 0),
+        taxType: allocation.taxType ? String(allocation.taxType) : undefined
+      }))
+    });
+    const settledObligations = (row.allocations || []).map((allocation) => {
+      const obligation = obligationById.get(String(allocation.taxObligationId));
+      const propertyView = obligation
+        ? linked.viewFor(obligation)
+        : presentObligationProperty({ propertyId: null, propertyName: null, propertyAddress: null });
+      const taxType = String(allocation.taxType || obligation?.taxType || '');
+      return {
+        taxObligationId: String(allocation.taxObligationId),
+        taxType,
+        taxPeriod: allocation.taxPeriod || obligation?.taxPeriod || '',
+        amount: Number(allocation.amount || 0),
+        label: TAX_TYPE_LABEL[taxType as CanonicalTaxType] || taxType,
+        propertyLabel: propertyView.propertyLabel,
+        propertyAddress: propertyView.propertyAddress
+      };
+    });
+    return {
+      ...row,
+      allocatedAmount: summary.allocatedAmount,
+      unallocatedAmount: summary.unallocatedAmount,
+      confirmedPaidAmount: summary.confirmedPaidAmount,
+      categories: summary.categories,
+      settledObligations
+    };
+  });
+  return res.json({ status: 'success', data });
 });
