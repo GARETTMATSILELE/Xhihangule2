@@ -179,6 +179,37 @@ function runStaticChecks() {
         && !(0, registrationPaymentPolicy_1.companyAwaitingRegistrationPayment)('ACTIVE')
         && !(0, registrationPaymentPolicy_1.companyAwaitingRegistrationPayment)('INITIALIZING_WORKSPACE'));
 }
+function ensureRegistrationTestIndexes() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const users = mongoose_1.default.connection.collection('users');
+        const indexes = yield users.indexes().catch(() => []);
+        const emailIndex = indexes.find((index) => index.key && index.key.email === 1 && Object.keys(index.key).length === 1);
+        if (emailIndex && !emailIndex.unique && emailIndex.name) {
+            yield users.dropIndex(emailIndex.name);
+        }
+        if (!(emailIndex === null || emailIndex === void 0 ? void 0 : emailIndex.unique)) {
+            yield users.createIndex({ email: 1 }, { unique: true, name: 'email_1' });
+        }
+        // Production keeps users_normalizedEmail_unique_v1 in saasSafeIndexes.ts.
+        // Local MongoDB rejects $ne inside partialFilterExpression, so a failed
+        // attempt here must not skip the registration checks or change that definition.
+        const named = (yield users.indexes()).some((index) => index.name === 'users_normalizedEmail_unique_v1');
+        if (!named) {
+            try {
+                yield users.createIndex({ normalizedEmail: 1 }, {
+                    name: 'users_normalizedEmail_unique_v1',
+                    unique: true,
+                    partialFilterExpression: { normalizedEmail: { $type: 'string', $ne: '' }, isArchived: { $ne: true } }
+                });
+            }
+            catch (error) {
+                const message = String((error === null || error === void 0 ? void 0 : error.message) || error);
+                if (!/expression not supported in partial index/i.test(message))
+                    throw error;
+            }
+        }
+    });
+}
 function runDatabaseChecks() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
@@ -199,6 +230,11 @@ function runDatabaseChecks() {
         const paynowRoutes = (yield Promise.resolve().then(() => __importStar(require('../routes/paynowRoutes')))).default;
         const { ensurePaymentSessionProviderRefIndex } = yield Promise.resolve().then(() => __importStar(require('../services/paymentSessionReferenceIndex')));
         yield connectDatabase();
+        const connectedUri = String(mongoose_1.default.connection.host || '');
+        if (/cosmos|azure|mantisafrica/i.test(connectedUri)) {
+            throw new Error('Registration payment tests must stay on a local database');
+        }
+        yield ensureRegistrationTestIndexes();
         const app = (0, express_1.default)();
         app.use(express_1.default.json());
         app.use(express_1.default.urlencoded({ extended: true }));

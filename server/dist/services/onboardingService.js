@@ -26,6 +26,7 @@ const plan_1 = require("../types/plan");
 const normalization_1 = require("../utils/normalization");
 const registrationPaymentPolicy_1 = require("./registrationPaymentPolicy");
 const systemPlanService_1 = require("./systemPlanService");
+const providerAvailability_1 = require("./subscriptionPayments/providerAvailability");
 const abandonedRegistrationService_1 = require("./abandonedRegistrationService");
 const billingActivationService_1 = require("./billingActivationService");
 const auditService_1 = require("./auditService");
@@ -41,6 +42,22 @@ function splitName(name) {
     const firstName = firstNameRaw || 'User';
     const lastName = lastParts.join(' ') || firstNameRaw || 'Admin';
     return { firstName, lastName };
+}
+function assignUnsentProvider(paymentSessionId, provider) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const session = yield PaymentSession_1.PaymentSession.findById(paymentSessionId);
+        if (!session || session.provider === provider || session.status !== 'pending' || (0, providerAvailability_1.hostedCheckoutStarted)(session)) {
+            if (session && session.provider !== provider && (0, providerAvailability_1.hostedCheckoutStarted)(session)) {
+                throw new errorHandler_1.AppError('A payment attempt is already open. Finish or cancel it before choosing another provider.', 409, 'PAYMENT_ATTEMPT_PENDING');
+            }
+            return;
+        }
+        session.provider = provider;
+        yield session.save();
+        if (session.billingPaymentId) {
+            yield BillingPayment_1.BillingPayment.updateOne({ _id: session.billingPaymentId }, { $set: { provider } });
+        }
+    });
 }
 function compensate(ids) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -126,9 +143,16 @@ class OnboardingService {
             if (paymentHold && amount == null) {
                 throw new errorHandler_1.AppError('This plan does not have a configured price for the selected billing frequency', 503, 'REGISTRATION_PRICE_NOT_CONFIGURED');
             }
+            let checkoutProvider = 'paynow';
+            if (paymentHold) {
+                const selection = (0, providerAvailability_1.selectSubscriptionProvider)(input.provider);
+                if (!selection.ok)
+                    throw new errorHandler_1.AppError(selection.message, selection.status, selection.code);
+                checkoutProvider = selection.provider;
+            }
             const duplicateUser = yield User_1.User.findOne({ $or: [{ normalizedEmail: email }, { email }] });
             if (duplicateUser) {
-                const resumed = yield this.recoverDuplicate(duplicateUser, input.password, { plan, billingCycle });
+                const resumed = yield this.recoverDuplicate(duplicateUser, input.password, { plan, billingCycle }, paymentHold ? checkoutProvider : undefined);
                 if (resumed)
                     return resumed;
             }
@@ -141,6 +165,9 @@ class OnboardingService {
                     if (!sessionUser || sessionUser.isArchived || !sameEmail || !passwordOk) {
                         throw new errorHandler_1.AppError(abandonedRegistrationService_1.SIGN_IN_REQUIRED_MESSAGE, 400, 'REGISTRATION_SIGN_IN_REQUIRED');
                     }
+                }
+                if (paymentHold && existingSession.paymentSessionId) {
+                    yield assignUnsentProvider(existingSession.paymentSessionId, checkoutProvider);
                 }
                 return this.hydrate(existingSession._id.toString(), true);
             }
@@ -222,7 +249,7 @@ class OnboardingService {
                             subscriptionId: subscription[0]._id,
                             onboardingSessionId: onboardingSession[0]._id,
                             idempotencyKey: `${idempotencyKey}:payment`,
-                            provider: 'paynow',
+                            provider: checkoutProvider,
                             providerRef: `SUBS-${company[0]._id.toString()}`,
                             plan,
                             billingCycle,
@@ -244,7 +271,7 @@ class OnboardingService {
                             amount,
                             currency: 'USD',
                             method: 'card',
-                            provider: 'paynow',
+                            provider: checkoutProvider,
                             providerRef: `SUBS-${company[0]._id.toString()}`,
                             idempotencyKey: `${idempotencyKey}:billing`,
                             status: 'pending'
@@ -332,7 +359,7 @@ class OnboardingService {
             }
         });
     }
-    recoverDuplicate(user, password, offer) {
+    recoverDuplicate(user, password, offer, provider) {
         return __awaiter(this, void 0, void 0, function* () {
             if (user.role === 'system_admin' || (user.roles || []).includes('system_admin') || !user.companyId) {
                 throw new errorHandler_1.AppError(abandonedRegistrationService_1.SIGN_IN_REQUIRED_MESSAGE, 400, 'REGISTRATION_SIGN_IN_REQUIRED');
@@ -348,10 +375,10 @@ class OnboardingService {
             if (!company) {
                 throw new errorHandler_1.AppError(abandonedRegistrationService_1.SIGN_IN_REQUIRED_MESSAGE, 400, 'REGISTRATION_SIGN_IN_REQUIRED');
             }
-            return this.buildResume(user, company, offer);
+            return this.buildResume(user, company, offer, provider);
         });
     }
-    buildResume(user, company, offer) {
+    buildResume(user, company, offer, provider) {
         return __awaiter(this, void 0, void 0, function* () {
             const [subscription, sessions, onboardingSession] = yield Promise.all([
                 Subscription_1.Subscription.findOne({ companyId: company._id }).sort({ createdAt: -1 }),
@@ -400,8 +427,18 @@ class OnboardingService {
                     .then((result) => (Object.assign(Object.assign({}, result), { company: refreshed || company })));
             }
             const openSession = sessions.find((session) => session.status === 'pending' || session.status === 'provider_created');
-            if (openSession && (openSession.status === 'provider_created' || openSession.pollUrl)) {
+            if (openSession && (0, providerAvailability_1.hostedCheckoutStarted)(openSession)) {
+                if (provider && openSession.provider !== provider) {
+                    throw new errorHandler_1.AppError('A payment attempt is already open. Finish or cancel it before choosing another provider.', 409, 'PAYMENT_ATTEMPT_PENDING');
+                }
                 return pack('payment', 'PAYMENT_IN_PROGRESS', 'This payment is still being checked. Do not start another payment until it is confirmed.', openSession);
+            }
+            if (provider && openSession && openSession.status === 'pending' && openSession.provider !== provider) {
+                openSession.provider = provider;
+                yield openSession.save();
+                if (openSession.billingPaymentId) {
+                    yield BillingPayment_1.BillingPayment.updateOne({ _id: openSession.billingPaymentId }, { $set: { provider } });
+                }
             }
             let paymentSession = openSession || sessions.find((session) => ['failed', 'cancelled', 'expired'].includes(session.status)) || null;
             if (paymentSession && paymentSession.status === 'pending' && !paymentSession.pollUrl && (paymentSession.plan !== offer.plan || paymentSession.billingCycle !== offer.billingCycle)) {
@@ -421,7 +458,11 @@ class OnboardingService {
                 }
             }
             if (!paymentSession && subscription) {
-                const amount = yield (0, systemPlanService_1.chargeForPlan)(company.plan, subscription.cycle);
+                const cycle = subscription.cycle === 'yearly' ? 'yearly' : subscription.cycle === 'monthly' ? 'monthly' : null;
+                if (!cycle) {
+                    throw new errorHandler_1.AppError('This billing frequency is not available for Paynow registration', 400, 'CYCLE_NOT_SUPPORTED');
+                }
+                const amount = yield (0, systemPlanService_1.chargeForPlan)(company.plan, cycle);
                 if (amount == null) {
                     throw new errorHandler_1.AppError('This plan does not have a configured price for the selected billing frequency', 503, 'REGISTRATION_PRICE_NOT_CONFIGURED');
                 }
@@ -431,7 +472,7 @@ class OnboardingService {
                     subscriptionId: subscription._id,
                     onboardingSessionId: onboardingSession === null || onboardingSession === void 0 ? void 0 : onboardingSession._id,
                     idempotencyKey: `resume:${company._id.toString()}:${Date.now()}`,
-                    provider: 'paynow',
+                    provider: provider || 'paynow',
                     providerRef: `SUBS-${company._id.toString()}`,
                     plan: company.plan,
                     billingCycle: subscription.cycle,

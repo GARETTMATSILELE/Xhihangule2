@@ -25,6 +25,7 @@ import { logger } from '../utils/logger';
 import { classifyOperationalFailure } from '../services/operationalFailure';
 import { processVerifiedPaynowEvent } from '../services/paynowCallbackService';
 import { installCorrectPaynowHashing, normalizePaynowCredential, shouldLoadLocalPaynowConfig } from '../services/paynowHash';
+import { hostedCheckoutStarted } from '../services/subscriptionPayments/providerAvailability';
 
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -163,13 +164,16 @@ export async function initiatePaynowCheckout(req: Request, input: {
 	if (callerCompanyId && String(session.companyId) !== String(callerCompanyId)) {
 		throw httpError('Payment session not found', 404, 'PAYMENT_SESSION_NOT_FOUND');
 	}
+	if (session.provider === 'dodo' && hostedCheckoutStarted(session)) {
+		throw httpError('A payment attempt is already open. Finish or cancel it before choosing another provider.', 409, 'PAYMENT_ATTEMPT_PENDING');
+	}
 	if (session.status === 'paid' || session.status === 'reconciled') {
 		throw httpError('This payment has already been completed', 409, 'PAYMENT_ALREADY_COMPLETED');
 	}
 
 	const plan = session.plan as Plan;
 	const cycle = session.billingCycle;
-	if (!plan || !cycle || !PLAN_CONFIG[plan] || !['monthly', 'yearly'].includes(cycle)) {
+	if (!plan || (cycle !== 'monthly' && cycle !== 'yearly') || !PLAN_CONFIG[plan]) {
 		throw httpError('A valid plan and billing cycle are required', 400, 'VALIDATION_ERROR');
 	}
 

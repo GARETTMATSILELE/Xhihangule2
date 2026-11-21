@@ -125,7 +125,7 @@ function main() {
                     country,
                     ownerId: agent._id,
                     taxProfile: registered
-                        ? { vatRegistered: true, vatNumber: 'ZW-PATH', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
+                        ? { vatRegistered: true, vatNumber: 'ZW-PATH', vatCategory: 'standard', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
                         : { vatRegistered: false }
                 });
                 agent.companyId = row._id;

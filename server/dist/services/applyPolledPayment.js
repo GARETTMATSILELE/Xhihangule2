@@ -177,6 +177,47 @@ function applyPolledPayment(reference, poll) {
             error.code = 'PAYMENT_MISMATCH';
             throw error;
         }
+        if (decision.outcome === 'paid' && (0, registrationPaymentPolicy_1.isOfficialPaynowTestSession)(session.metadata)) {
+            if (!(0, registrationPaymentPolicy_1.officialPaynowTestAlreadyVerified)(session.metadata)) {
+                const audited = yield (0, auditService_1.recordAuditEvent)({
+                    companyId: String(session.companyId),
+                    action: 'checkout.test_verified',
+                    entityType: 'PaymentSession',
+                    entityId: String(session._id),
+                    metadata: {
+                        providerRef: session.providerRef,
+                        officialPaynowTest: true,
+                        amount: Number(poll.amount),
+                        currency: String(poll.currency || session.currency || 'USD'),
+                        paynowReference: poll.paynowReference,
+                        origin: poll.origin || 'webhook'
+                    }
+                });
+                if (!audited) {
+                    const error = new Error('The official Paynow test was not recorded because the audit event could not be stored');
+                    error.code = 'AUDIT_PERSIST_FAILED';
+                    throw error;
+                }
+                session.metadata = Object.assign(Object.assign({}, (session.metadata || {})), { officialPaynowTest: true, officialPaynowTestResult: {
+                        verified: true,
+                        amount: Number(poll.amount),
+                        currency: String(poll.currency || session.currency || 'USD'),
+                        paynowReference: poll.paynowReference || undefined,
+                        origin: poll.origin || 'webhook',
+                        verifiedAt: new Date().toISOString()
+                    } });
+                session.markModified('metadata');
+                yield session.save();
+                logger_1.logger.info('paynow_official_test_recorded', {
+                    correlationId: reference,
+                    reference,
+                    paymentSessionId: String(session._id),
+                    amount: Number(poll.amount),
+                    currency: String(poll.currency || session.currency || 'USD')
+                });
+            }
+            return { found: true, paymentStatus: 'test_verified', activated: false, testRecorded: true, session };
+        }
         if (decision.outcome === 'paid') {
             const audited = yield (0, auditService_1.recordAuditEvent)({
                 companyId: String(session.companyId),
@@ -186,7 +227,8 @@ function applyPolledPayment(reference, poll) {
                 metadata: {
                     providerRef: session.providerRef,
                     paynowMode: ((_b = session.metadata) === null || _b === void 0 ? void 0 : _b.paynowMode) || undefined,
-                    testTransaction: ((_c = session.metadata) === null || _c === void 0 ? void 0 : _c.paynowMode) === 'test'
+                    testTransaction: ((_c = session.metadata) === null || _c === void 0 ? void 0 : _c.paynowMode) === 'test',
+                    origin: poll.origin || 'webhook'
                 }
             });
             if (!audited) {

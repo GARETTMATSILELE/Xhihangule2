@@ -53,7 +53,8 @@ const run = () => {
         commissionDetails: { ownerAmount: 0, agentShare: 0, agencyShare: 800, totalCommission: 800 }
     };
     const zeroOwnerExpected = (0, paymentAccountingProjection_1.buildExpectedAccountingProjection)(zeroOwnerCash);
-    assert_1.default.strictEqual(zeroOwnerExpected.ownerIncome, true);
+    assert_1.default.strictEqual(zeroOwnerExpected.ownerIncome, false);
+    assert_1.default.strictEqual(zeroOwnerExpected.journal, true);
     const zeroOwnerRecon = (0, paymentAccountingProjection_1.evaluateAccountingReconciliation)({
         paymentId: 'zero-owner-cash',
         expected: zeroOwnerExpected,
@@ -66,7 +67,22 @@ const run = () => {
             deposit: false
         }
     });
-    assert_1.default.strictEqual(zeroOwnerRecon.accountingComplete, false);
+    assert_1.default.strictEqual(zeroOwnerRecon.accountingComplete, true);
+    assert_1.default.strictEqual(zeroOwnerRecon.componentStatus.ownerIncome, 'NOT_APPLICABLE');
+    const zeroOwnerMissingJournal = (0, paymentAccountingProjection_1.evaluateAccountingReconciliation)({
+        paymentId: 'zero-owner-cash',
+        expected: zeroOwnerExpected,
+        actual: {
+            ownerIncome: false,
+            agentCommission: false,
+            companyCommission: true,
+            journal: false,
+            vat: false,
+            deposit: false
+        }
+    });
+    assert_1.default.strictEqual(zeroOwnerMissingJournal.accountingComplete, false);
+    assert_1.default.ok(zeroOwnerMissingJournal.missing.includes('journal'));
     // REAL-009 / REAL-010 historical domain survives a later property change
     const rentalThenSale = (0, transactionDomain_1.historicalTransactionDomain)({ transactionDomain: 'RENTAL', paymentType: 'rental' });
     assert_1.default.strictEqual(rentalThenSale, 'RENTAL');

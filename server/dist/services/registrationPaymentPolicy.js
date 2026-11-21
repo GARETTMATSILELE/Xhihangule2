@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PAYNOW_RECOVERY_MAX_AGE_MS = exports.PAYNOW_RECOVERY_INTERVAL_MS = exports.PAYNOW_RECOVERY_MAX_ATTEMPTS = void 0;
 exports.configuredPlanCharge = configuredPlanCharge;
 exports.registrationCreatesPaymentHold = registrationCreatesPaymentHold;
 exports.enterpriseDirectCheckoutEnabled = enterpriseDirectCheckoutEnabled;
@@ -19,6 +20,9 @@ exports.paynowRequestHost = paynowRequestHost;
 exports.paynowHostname = paynowHostname;
 exports.isReservedProductionPaynowHost = isReservedProductionPaynowHost;
 exports.evaluatePaynowDeployment = evaluatePaynowDeployment;
+exports.paynowRecoveryDecision = paynowRecoveryDecision;
+exports.isOfficialPaynowTestSession = isOfficialPaynowTestSession;
+exports.officialPaynowTestAlreadyVerified = officialPaynowTestAlreadyVerified;
 exports.paynowModeMatchesSession = paynowModeMatchesSession;
 exports.explainUnreconciledPaynowSession = explainUnreconciledPaynowSession;
 exports.paynowConfigurationState = paynowConfigurationState;
@@ -330,6 +334,41 @@ function evaluatePaynowDeployment(env, input = {}) {
         resultPath: (result === null || result === void 0 ? void 0 : result.pathname) || '',
         returnPath: (returning === null || returning === void 0 ? void 0 : returning.pathname) || ''
     };
+}
+exports.PAYNOW_RECOVERY_MAX_ATTEMPTS = 8;
+exports.PAYNOW_RECOVERY_INTERVAL_MS = 2 * 60 * 1000;
+exports.PAYNOW_RECOVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+function paynowRecoveryDecision(session, now = new Date()) {
+    if (session.status !== 'provider_created')
+        return { action: 'skip', reason: 'not_pending' };
+    if (!session.pollUrl || !isAllowedPaynowPollUrl(session.pollUrl))
+        return { action: 'skip', reason: 'poll_url_not_allowed' };
+    if (officialPaynowTestAlreadyVerified(session.metadata))
+        return { action: 'skip', reason: 'test_already_verified' };
+    const created = session.createdAt ? new Date(session.createdAt).getTime() : now.getTime();
+    if (!Number.isFinite(created) || now.getTime() - created > exports.PAYNOW_RECOVERY_MAX_AGE_MS) {
+        return { action: 'skip', reason: 'too_old' };
+    }
+    const recovery = session.metadata && typeof session.metadata === 'object'
+        ? session.metadata.paynowRecovery
+        : undefined;
+    const attempts = Number((recovery === null || recovery === void 0 ? void 0 : recovery.attempts) || 0);
+    if (attempts >= exports.PAYNOW_RECOVERY_MAX_ATTEMPTS)
+        return { action: 'skip', reason: 'attempts_exhausted' };
+    const last = (recovery === null || recovery === void 0 ? void 0 : recovery.lastAttemptAt) ? new Date(String(recovery.lastAttemptAt)).getTime() : 0;
+    if (last && now.getTime() - last < exports.PAYNOW_RECOVERY_INTERVAL_MS)
+        return { action: 'skip', reason: 'too_soon' };
+    return { action: 'poll' };
+}
+/** A session explicitly marked for Paynow's official simulated test. Ordinary checkouts are not marked. */
+function isOfficialPaynowTestSession(metadata) {
+    return Boolean(metadata && typeof metadata === 'object' && metadata.officialPaynowTest === true);
+}
+function officialPaynowTestAlreadyVerified(metadata) {
+    if (!isOfficialPaynowTestSession(metadata))
+        return false;
+    const result = metadata.officialPaynowTestResult;
+    return (result === null || result === void 0 ? void 0 : result.verified) === true;
 }
 /** A checkout stamped test or live can be completed only while the server is still in that mode. */
 function paynowModeMatchesSession(sessionMode, env = process.env) {

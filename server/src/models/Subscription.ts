@@ -5,7 +5,7 @@ export interface ISubscription extends Document {
   userId?: Types.ObjectId;
   onboardingSessionId?: Types.ObjectId;
   plan: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
-  cycle: 'monthly' | 'yearly';
+  cycle: 'monthly' | 'quarterly' | 'yearly';
   status: 'trial' | 'active' | 'past_due' | 'canceled' | 'cancelled' | 'suspended' | 'expired' | 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED' | 'EXPIRED';
   currentPeriodStart?: Date;
   currentPeriodEnd?: Date;
@@ -13,7 +13,9 @@ export interface ISubscription extends Document {
   gracePeriodEnd?: Date;
   paynowRef?: string;
   pollUrl?: string;
-  provider?: 'paynow' | 'cash' | 'manual';
+  provider?: 'paynow' | 'dodo' | 'cash' | 'manual';
+  providerCustomerId?: string;
+  providerSubscriptionId?: string;
   lastPaymentSessionId?: Types.ObjectId;
   lastPaymentAt?: Date;
   lastReconciledAt?: Date;
@@ -41,7 +43,7 @@ const subscriptionSchema = new Schema<ISubscription>({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: false, index: true },
   onboardingSessionId: { type: Schema.Types.ObjectId, ref: 'OnboardingSession', required: false, index: true },
   plan: { type: String, enum: ['INDIVIDUAL','SME','ENTERPRISE'], required: true },
-  cycle: { type: String, enum: ['monthly','yearly'], required: true },
+  cycle: { type: String, enum: ['monthly','quarterly','yearly'], required: true },
   status: { type: String, enum: ['trial','active','past_due','canceled','cancelled','suspended','expired','TRIAL','ACTIVE','PAST_DUE','SUSPENDED','CANCELLED','EXPIRED'], default: 'trial', index: true },
   currentPeriodStart: { type: Date },
   currentPeriodEnd: { type: Date },
@@ -49,7 +51,9 @@ const subscriptionSchema = new Schema<ISubscription>({
   gracePeriodEnd: { type: Date },
   paynowRef: { type: String },
   pollUrl: { type: String },
-  provider: { type: String, enum: ['paynow', 'cash', 'manual'] },
+  provider: { type: String, enum: ['paynow', 'dodo', 'cash', 'manual'] },
+  providerCustomerId: { type: String, trim: true },
+  providerSubscriptionId: { type: String, trim: true, index: true },
   lastPaymentSessionId: { type: Schema.Types.ObjectId, ref: 'PaymentSession' },
   lastPaymentAt: { type: Date },
   lastReconciledAt: { type: Date },

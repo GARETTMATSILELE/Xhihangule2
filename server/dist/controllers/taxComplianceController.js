@@ -8,12 +8,18 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listTaxPayments = exports.getComplianceMigrationReport = exports.runCompanyTaxIntegrity = exports.resolveTaxReview = exports.listTaxReviews = exports.patchVatReturn = exports.listCompanyVatReturns = exports.prepareCompanyVatReturn = exports.uploadZimraPaymentReceipt = exports.postZimraPayment = exports.getTaxReconciliation = exports.listTaxObligations = exports.getTaxPosition = exports.getTaxComplianceDashboard = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const TaxObligation_1 = require("../models/TaxObligation");
 const TaxPayment_1 = require("../models/TaxPayment");
 const TaxReviewItem_1 = require("../models/TaxReviewItem");
 const ChartOfAccount_1 = require("../models/ChartOfAccount");
+const Property_1 = require("../models/Property");
+const Payment_1 = require("../models/Payment");
 const vatReturnService_1 = require("../services/vatReturnService");
 const zimraPaymentService_1 = require("../services/zimraPaymentService");
 const taxComplianceReviewService_1 = require("../services/taxComplianceReviewService");
@@ -25,8 +31,8 @@ const chartAccounts_1 = require("../services/tax/chartAccounts");
 const money_1 = require("../utils/money");
 const errorHandler_1 = require("../middleware/errorHandler");
 const trustReconciliation_1 = require("../services/tax/trustReconciliation");
-const taxPositionRead_1 = require("../services/tax/taxPositionRead");
-const newTaxIntegrityRead_1 = require("../services/tax/newTaxIntegrityRead");
+const taxDashboardRead_1 = require("../services/tax/taxDashboardRead");
+const taxDashboard_1 = require("../services/tax/taxDashboard");
 const companyIdOf = (req) => {
     var _a;
     const id = (_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId;
@@ -34,6 +40,41 @@ const companyIdOf = (req) => {
         throw new errorHandler_1.AppError('Company ID required', 400);
     return String(id);
 };
+function loadLinkedProperties(companyId, links) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const paymentIds = links.map((link) => link.paymentId).filter(Boolean);
+        const payments = paymentIds.length
+            ? yield Payment_1.Payment.find({ companyId, _id: { $in: paymentIds } }).select('referenceNumber propertyId').lean()
+            : [];
+        const paymentById = new Map(payments.map((row) => [String(row._id), row]));
+        const propertyIds = Array.from(new Set(links.map((link) => {
+            const payment = link.paymentId ? paymentById.get(String(link.paymentId)) : undefined;
+            return (0, taxDashboard_1.resolveLinkedPropertyId)({
+                obligationPropertyId: link.propertyId ? String(link.propertyId) : null,
+                paymentPropertyId: (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : null
+            });
+        }).filter((id) => Boolean(id))));
+        const properties = propertyIds.length
+            ? yield Property_1.Property.find({ companyId, _id: { $in: propertyIds } }).select('name address').lean()
+            : [];
+        const propertyById = new Map(properties.map((row) => [String(row._id), row]));
+        const viewFor = (link) => {
+            const payment = link.paymentId ? paymentById.get(String(link.paymentId)) : undefined;
+            const propertyId = (0, taxDashboard_1.resolveLinkedPropertyId)({
+                obligationPropertyId: link.propertyId ? String(link.propertyId) : null,
+                paymentPropertyId: (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : null
+            });
+            const property = propertyId ? propertyById.get(propertyId) : undefined;
+            return Object.assign({ propertyId,
+                payment }, (0, taxDashboard_1.presentObligationProperty)({
+                propertyId,
+                propertyName: (property === null || property === void 0 ? void 0 : property.name) || null,
+                propertyAddress: (0, taxDashboard_1.formatPropertyAddress)(property === null || property === void 0 ? void 0 : property.address)
+            }));
+        };
+        return { viewFor };
+    });
+}
 const asyncHandler = (fn) => (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
 };
@@ -181,22 +222,47 @@ exports.getTaxPosition = asyncHandler((req, res) => __awaiter(void 0, void 0, vo
             return res.status(400).json({ message: 'asOf must be a valid date' });
         }
     }
-    const position = yield (0, taxPositionRead_1.loadCompanyTaxPosition)(companyIdOf(req), asOf);
-    const newPeriod = yield (0, newTaxIntegrityRead_1.loadNewTaxIntegrity)(companyIdOf(req));
-    return res.json({ status: 'success', data: Object.assign(Object.assign({}, position), { newPeriod }) });
+    const taxPeriod = req.query.taxPeriod ? String(req.query.taxPeriod).trim() : '';
+    if (taxPeriod && (taxPeriod.length > 32 || /[^\w-]/.test(taxPeriod))) {
+        return res.status(400).json({ message: 'taxPeriod is not a valid filing period' });
+    }
+    const data = yield (0, taxDashboardRead_1.loadTaxPositionResponse)(companyIdOf(req), asOf, taxPeriod || undefined);
+    return res.json({ status: 'success', data });
 }));
 exports.listTaxObligations = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const companyId = companyIdOf(req);
+    const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
     const taxType = req.query.taxType ? String(req.query.taxType) : undefined;
     const period = req.query.period ? String(req.query.period) : undefined;
     const rows = yield TaxObligation_1.TaxObligation.find(Object.assign(Object.assign({ companyId }, (taxType ? { taxType } : {})), (period ? { taxPeriod: period } : {})))
         .sort({ transactionDate: -1 })
         .limit(500)
         .lean();
-    const withOutstanding = [];
-    for (const row of rows) {
-        withOutstanding.push(Object.assign(Object.assign({}, row), { outstanding: yield (0, taxObligationService_1.outstandingForObligation)(String(row._id)), label: taxTypes_1.TAX_TYPE_LABEL[row.taxType] || row.taxType }));
-    }
+    const obligationIds = rows.map((row) => row._id);
+    const [paidRows, linked] = yield Promise.all([
+        obligationIds.length
+            ? TaxPayment_1.TaxPayment.aggregate([
+                { $match: { companyId: companyObjectId, status: 'POSTED', 'allocations.taxObligationId': { $in: obligationIds } } },
+                { $unwind: '$allocations' },
+                { $match: { 'allocations.taxObligationId': { $in: obligationIds } } },
+                { $group: { _id: '$allocations.taxObligationId', total: { $sum: '$allocations.amount' } } }
+            ])
+            : [],
+        loadLinkedProperties(companyId, rows)
+    ]);
+    const paidById = new Map(paidRows.map((row) => [String(row._id), Number(row.total || 0)]));
+    const withOutstanding = rows.map((row) => {
+        var _a;
+        const propertyView = linked.viewFor(row);
+        const amounts = (0, taxDashboard_1.presentObligationAmounts)({
+            taxType: String(row.taxType),
+            taxAmount: Number(row.taxAmount || 0),
+            status: String(row.status || ''),
+            reversalOf: row.reversalOf ? String(row.reversalOf) : null,
+            allocatedPaid: paidById.get(String(row._id)) || 0
+        });
+        return Object.assign(Object.assign({}, row), { propertyId: propertyView.propertyId || row.propertyId || null, outstanding: amounts.outstanding, amountPaid: amounts.amountPaid, paymentStatus: amounts.paymentStatus, categoryKey: amounts.categoryKey, categoryLabel: amounts.categoryLabel, label: taxTypes_1.TAX_TYPE_LABEL[row.taxType] || row.taxType, propertyName: propertyView.propertyAvailable ? propertyView.propertyLabel : null, propertyAddress: propertyView.propertyAddress || null, propertyAvailable: propertyView.propertyAvailable, propertyLabel: propertyView.propertyLabel, sourcePaymentReference: ((_a = propertyView.payment) === null || _a === void 0 ? void 0 : _a.referenceNumber) || row.paymentReference || null });
+    });
     return res.json({ status: 'success', data: withOutstanding });
 }));
 exports.getTaxReconciliation = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -326,10 +392,45 @@ exports.getComplianceMigrationReport = asyncHandler((req, res) => __awaiter(void
     return res.json({ status: 'success', data: report });
 }));
 exports.listTaxPayments = asyncHandler((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const rows = yield TaxPayment_1.TaxPayment.find({ companyId: companyIdOf(req) })
+    const companyId = companyIdOf(req);
+    const rows = yield TaxPayment_1.TaxPayment.find({ companyId })
         .select('-receiptData')
         .sort({ paymentDate: -1 })
         .limit(100)
         .lean();
-    return res.json({ status: 'success', data: rows });
+    const obligationIds = rows.flatMap((row) => (row.allocations || []).map((allocation) => allocation.taxObligationId)).filter(Boolean);
+    const obligations = obligationIds.length
+        ? yield TaxObligation_1.TaxObligation.find({ companyId, _id: { $in: obligationIds } }).select('taxType taxPeriod propertyId paymentId').lean()
+        : [];
+    const linked = yield loadLinkedProperties(companyId, obligations);
+    const obligationById = new Map(obligations.map((row) => [String(row._id), row]));
+    const data = rows.map((row) => {
+        const summary = (0, taxDashboard_1.summariseTaxPayment)({
+            status: String(row.status || ''),
+            amount: Number(row.amount || 0),
+            unallocatedAmount: Number(row.unallocatedAmount || 0),
+            allocations: (row.allocations || []).map((allocation) => ({
+                amount: Number(allocation.amount || 0),
+                taxType: allocation.taxType ? String(allocation.taxType) : undefined
+            }))
+        });
+        const settledObligations = (row.allocations || []).map((allocation) => {
+            const obligation = obligationById.get(String(allocation.taxObligationId));
+            const propertyView = obligation
+                ? linked.viewFor(obligation)
+                : (0, taxDashboard_1.presentObligationProperty)({ propertyId: null, propertyName: null, propertyAddress: null });
+            const taxType = String(allocation.taxType || (obligation === null || obligation === void 0 ? void 0 : obligation.taxType) || '');
+            return {
+                taxObligationId: String(allocation.taxObligationId),
+                taxType,
+                taxPeriod: allocation.taxPeriod || (obligation === null || obligation === void 0 ? void 0 : obligation.taxPeriod) || '',
+                amount: Number(allocation.amount || 0),
+                label: taxTypes_1.TAX_TYPE_LABEL[taxType] || taxType,
+                propertyLabel: propertyView.propertyLabel,
+                propertyAddress: propertyView.propertyAddress
+            };
+        });
+        return Object.assign(Object.assign({}, row), { allocatedAmount: summary.allocatedAmount, unallocatedAmount: summary.unallocatedAmount, confirmedPaidAmount: summary.confirmedPaidAmount, categories: summary.categories, settledObligations });
+    });
+    return res.json({ status: 'success', data });
 }));

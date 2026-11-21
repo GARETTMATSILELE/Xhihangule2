@@ -126,7 +126,7 @@ function main() {
             tinNumber: 'JRN-REV-TIN',
             country: 'Zimbabwe',
             ownerId: user._id,
-            taxProfile: { vatRegistered: true, vatNumber: 'ZW-JRN', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
+            taxProfile: { vatRegistered: true, vatNumber: 'ZW-JRN', vatCategory: 'standard', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
         });
         yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(company._id), date: PAYMENT_DATE, createdBy: String(user._id) });
         yield (0, accountingPeriodService_1.openExplicitPeriodForDate)({ companyId: String(company._id), date: new Date(), createdBy: String(user._id) });

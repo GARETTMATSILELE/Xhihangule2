@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Box, Container, Paper, Typography, Alert, CircularProgress, Button, ToggleButtonGroup, ToggleButton, TextField, Stack } from '@mui/material';
 import api from '../../api/axios';
-import PaynowBadge from '../../components/payments/PaynowBadge';
+import PaymentMethodChoice, { checkoutButtonLabel, PaymentProviderId, PaymentProviderOption } from '../../components/payments/PaymentMethodChoice';
 
 type Plan = 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
 type Cycle = 'monthly' | 'yearly';
@@ -20,6 +20,7 @@ type CheckoutQuote = {
   amount: number;
   currency: string;
   status: string;
+  provider?: PaymentProviderId;
   awaitingConfirmation?: boolean;
 };
 
@@ -43,7 +44,11 @@ const PaypalCheckout: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(true);
-  const [method, setMethod] = useState<'paynow' | 'cash'>('paynow');
+  const [method, setMethod] = useState<'provider' | 'cash'>('provider');
+  const [provider, setProvider] = useState<PaymentProviderId | ''>('');
+  const [providers, setProviders] = useState<PaymentProviderOption[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [providersError, setProvidersError] = useState('');
   const [cashCode, setCashCode] = useState('');
   const [cashPin, setCashPin] = useState('');
 
@@ -77,6 +82,30 @@ const PaypalCheckout: React.FC = () => {
       cancelled = true;
     };
   }, [paymentSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/billing/providers')
+      .then((response) => {
+        if (cancelled) return;
+        const methods = (response.data?.providers || []).filter((item: PaymentProviderOption) => item.available && item.cycles.includes(cycle));
+        setProviders(methods);
+      })
+      .catch(() => {
+        if (!cancelled) setProvidersError('Payment methods could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setProvidersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cycle]);
+
+  useEffect(() => {
+    if (!quote?.provider || provider) return;
+    if (providers.some((item) => item.id === quote.provider)) setProvider(quote.provider);
+  }, [quote, provider, providers]);
 
   const displayPlan = quote?.plan || plan;
   const displayCycle = quote?.billingCycle || cycle;
@@ -123,31 +152,34 @@ const PaypalCheckout: React.FC = () => {
     }
   };
 
-  const handlePaynowCheckout = async () => {
+  const handleProviderCheckout = async () => {
     try {
       setLoading(true);
       setMessage(null);
+      if (!provider) {
+        setMessage({ type: 'info', text: 'Choose a payment method before continuing.' });
+        return;
+      }
       const sessionId = quote?.paymentSessionId || paymentSessionId;
       if (!sessionId) {
         setMessage({ type: 'error', text: 'Checkout is not ready. Register the company again only if you have not already created it.' });
         return;
       }
-      const resp = await api.post('/paynow/web/create', {
-        paymentSessionId: sessionId,
-        description: `Mantis ${displayPlan} ${displayCycle} subscription`
+      const resp = await api.post('/billing/checkout', {
+        plan: displayPlan,
+        cycle: displayCycle,
+        provider
       });
       const redirectUrl = resp.data?.redirectUrl;
       if (!redirectUrl) {
-        throw new Error(resp.data?.message || 'Paynow redirect URL not provided');
+        throw new Error(resp.data?.message || 'Checkout did not return a payment page.');
       }
       window.location.href = redirectUrl;
     } catch (e: any) {
       const code = e?.response?.data?.code;
-      const text = code === 'PAYMENT_ALREADY_COMPLETED'
-        ? 'This payment is already confirmed. Sign in to continue.'
-        : code === 'PAYMENT_AWAITING_CONFIRMATION'
-          ? 'This payment is still being checked. Do not start another payment until it is confirmed.'
-          : (e?.response?.data?.message || e?.message || 'Failed to start Paynow checkout.');
+      const text = code === 'PAYMENT_ALREADY_COMPLETED' || code === 'PAYMENT_AWAITING_CONFIRMATION' || code === 'PAYMENT_ATTEMPT_PENDING'
+        ? (e?.response?.data?.message || 'This payment is still being checked. Do not start another payment.')
+        : (e?.response?.data?.message || e?.message || 'Failed to start checkout.');
       setMessage({ type: code === 'PAYMENT_ALREADY_COMPLETED' ? 'info' : 'error', text });
     } finally {
       setLoading(false);
@@ -171,7 +203,7 @@ const PaypalCheckout: React.FC = () => {
         {message && (
           <Alert severity={message.type} sx={{ mb: 2 }}>{message.text}</Alert>
         )}
-        {!message && quote?.status === 'pending' && !quote.awaitingConfirmation && (
+        {!message && quote?.status === 'pending' && (
           <Alert severity="info" sx={{ mb: 2 }}>
             Registration is not complete until payment is confirmed. You can leave and resume later with the same email address and password.
           </Alert>
@@ -181,7 +213,7 @@ const PaypalCheckout: React.FC = () => {
             No successful payment has been confirmed. Retry checkout when you are ready. This registration is still saved.
           </Alert>
         )}
-        {!message && (quote?.status === 'provider_created' || quote?.awaitingConfirmation) && (
+        {!message && quote?.status === 'provider_created' && (
           <Alert severity="info" sx={{ mb: 2 }}>
             This payment is still being checked. Continue the existing checkout instead of starting another payment.
           </Alert>
@@ -194,27 +226,38 @@ const PaypalCheckout: React.FC = () => {
             onChange={(_, v) => v && setMethod(v)}
             size="small"
           >
-            <ToggleButton value="paynow">Paynow</ToggleButton>
+            <ToggleButton value="provider">Card or local payment</ToggleButton>
             <ToggleButton value="cash">Cash Code</ToggleButton>
           </ToggleButtonGroup>
         </Box>
 
-        {method === 'paynow' ? (
+        {method === 'provider' ? (
           <Box sx={{ mb: 2 }}>
+            <PaymentMethodChoice
+              providers={providers}
+              value={provider}
+              onChange={setProvider}
+              disabled={loading || quote?.status === 'provider_created'}
+              loading={providersLoading}
+              error={providersError}
+            />
             <Button
               variant="contained"
-              color="primary"
-              onClick={handlePaynowCheckout}
-              disabled={loading || quoteLoading || !quote || quote.status === 'paid' || quote.status === 'reconciled' || (quote.awaitingConfirmation && quote.status === 'pending')}
+              color="secondary"
+              fullWidth
+              sx={{ mt: 2 }}
+              onClick={handleProviderCheckout}
+              disabled={loading || quoteLoading || providersLoading || !provider || !quote || quote.status === 'paid' || quote.status === 'reconciled'}
             >
-              {loading ? <CircularProgress size={20} /> : (quote?.status === 'cancelled' || quote?.status === 'failed' || quote?.status === 'expired') ? 'Retry checkout' : quote?.status === 'provider_created' ? 'Continue checkout' : 'Pay with Paynow'}
+              {loading ? <CircularProgress size={20} /> : checkoutButtonLabel(provider, 'paid')}
             </Button>
             <Typography variant="body2" sx={{ mt: 1, color: 'inherit', opacity: 0.9 }}>
-              You will be redirected to Paynow to pay by Visa, Mastercard, EcoCash, Zimswitch or Telecash.
+              {provider === 'dodo'
+                ? 'You will be redirected to a secure card page. Returning to Mantis does not activate the subscription by itself.'
+                : provider === 'paynow'
+                  ? 'You will be redirected to Paynow. The subscription starts only after Paynow confirms the payment.'
+                  : 'Select Paynow or Dodo Payments. Checkout does not start until you continue.'}
             </Typography>
-            <Box sx={{ mt: 2, p: 1.5, bgcolor: '#fff', borderRadius: 2, display: 'inline-block' }}>
-              <PaynowBadge />
-            </Box>
           </Box>
         ) : (
           <Box sx={{ mb: 2 }}>

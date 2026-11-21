@@ -209,9 +209,23 @@ export async function loadAccountingActualSnapshot(payment: any): Promise<Accoun
       deposit: linkedId((depositDoc as any)?.paymentId)
     },
     duplicates: {
-      ownerIncome: incomeTxs.length || undefined,
-      companyCommission: companyTxs.length || undefined,
-      deposit: (deposits as any[]).length || undefined
+      ownerIncome: incomeTxs.length > 1 ? incomeTxs.length : undefined,
+      agentCommission: agentTxs.length > 1 ? agentTxs.length : undefined,
+      companyCommission: companyTxs.length > 1 ? companyTxs.length : undefined,
+      journal: (journalCandidates as any[]).filter((journal) =>
+        String(journal?.status || 'posted') === 'posted'
+        && String(journal?.sourceId || '') === paymentId
+        && String(journal?.sourceModule || '') === String(receiptModule || '')
+        && (!companyObjectId || String(journal?.companyId || '') === String(companyObjectId))
+      ).length > 1
+        ? (journalCandidates as any[]).filter((journal) =>
+          String(journal?.status || 'posted') === 'posted'
+          && String(journal?.sourceId || '') === paymentId
+          && String(journal?.sourceModule || '') === String(receiptModule || '')
+          && (!companyObjectId || String(journal?.companyId || '') === String(companyObjectId))
+        ).length
+        : undefined,
+      deposit: (deposits as any[]).length > 1 ? (deposits as any[]).length : undefined
     },
     journalReferenceCollision: journalClass.referenceCollision || undefined,
     journalOtherCompanyReference: journalClass.otherCompanyReference || undefined

@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const paynowController_1 = require("../controllers/paynowController");
 const auth_1 = require("../middleware/auth");
+const paynowRecoveryService_1 = require("../services/paynowRecoveryService");
+(0, paynowRecoveryService_1.startPaynowRecoveryJob)();
 const router = (0, express_1.Router)();
 router.get('/status', paynowController_1.getStatus);
 router.post('/web/create', auth_1.authWithCompany, paynowController_1.createWebPayment);

@@ -168,6 +168,37 @@ function runStaticChecks() {
     && !companyAwaitingRegistrationPayment('INITIALIZING_WORKSPACE'));
 }
 
+async function ensureRegistrationTestIndexes() {
+  const users = mongoose.connection.collection('users');
+  const indexes = await users.indexes().catch(() => []);
+  const emailIndex = indexes.find((index: { key?: Record<string, number>; unique?: boolean; name?: string }) => index.key && index.key.email === 1 && Object.keys(index.key).length === 1);
+  if (emailIndex && !emailIndex.unique && emailIndex.name) {
+    await users.dropIndex(emailIndex.name);
+  }
+  if (!emailIndex?.unique) {
+    await users.createIndex({ email: 1 }, { unique: true, name: 'email_1' });
+  }
+  // Production keeps users_normalizedEmail_unique_v1 in saasSafeIndexes.ts.
+  // Local MongoDB rejects $ne inside partialFilterExpression, so a failed
+  // attempt here must not skip the registration checks or change that definition.
+  const named = (await users.indexes()).some((index: { name?: string }) => index.name === 'users_normalizedEmail_unique_v1');
+  if (!named) {
+    try {
+      await users.createIndex(
+        { normalizedEmail: 1 },
+        {
+          name: 'users_normalizedEmail_unique_v1',
+          unique: true,
+          partialFilterExpression: { normalizedEmail: { $type: 'string', $ne: '' }, isArchived: { $ne: true } }
+        }
+      );
+    } catch (error: any) {
+      const message = String(error?.message || error);
+      if (!/expression not supported in partial index/i.test(message)) throw error;
+    }
+  }
+}
+
 async function runDatabaseChecks() {
   if (process.env.NODE_ENV === 'production') {
     record('Database registration checks were not run against production', true, 'NODE_ENV=production');
@@ -188,6 +219,11 @@ async function runDatabaseChecks() {
   const { ensurePaymentSessionProviderRefIndex } = await import('../services/paymentSessionReferenceIndex');
 
   await connectDatabase();
+  const connectedUri = String(mongoose.connection.host || '');
+  if (/cosmos|azure|mantisafrica/i.test(connectedUri)) {
+    throw new Error('Registration payment tests must stay on a local database');
+  }
+  await ensureRegistrationTestIndexes();
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));

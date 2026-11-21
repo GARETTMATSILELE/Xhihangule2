@@ -142,3 +142,5 @@ Checkout is refused when the result host is `www.mantisafrica.com` or `*.azurewe
 `PAYNOW_CALLBACK_HOST` lets an isolated test harness, or a non-production tunnel you choose, receive callbacks. It cannot be set to the production hosts above. Do not publish the local development server to the internet just to receive a callback.
 
 Automated tests set `PAYNOW_DISABLE_LOCAL_CONFIG=1` and use integration id `90001`. They do not read `server/config/local.paynow.json` and they do not call Paynow.
+
+Dodo Payments is a separate subscription checkout provider. It does not replace Paynow. See `docs/dodo-payments.md`. Leave `DODO_PAYMENTS_ENABLED` unset or `false` until that checklist is complete.

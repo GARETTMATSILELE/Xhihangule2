@@ -16,11 +16,14 @@ export interface IPaymentSession extends Document {
   onboardingSessionId?: Types.ObjectId;
   billingPaymentId?: Types.ObjectId;
   idempotencyKey: string;
-  provider: 'paynow' | 'cash' | 'manual';
+  provider: 'paynow' | 'dodo' | 'cash' | 'manual';
   providerRef?: string;
+  providerTransactionId?: string;
+  providerCustomerId?: string;
+  providerSubscriptionId?: string;
   pollUrl?: string;
   plan: 'INDIVIDUAL' | 'SME' | 'ENTERPRISE';
-  billingCycle: 'monthly' | 'yearly';
+  billingCycle: 'monthly' | 'quarterly' | 'yearly';
   amount: number;
   currency: 'USD' | 'ZWL';
   status: PaymentSessionStatus;
@@ -41,11 +44,14 @@ const PaymentSessionSchema = new Schema<IPaymentSession>(
     onboardingSessionId: { type: Schema.Types.ObjectId, ref: 'OnboardingSession', required: false, index: true },
     billingPaymentId: { type: Schema.Types.ObjectId, ref: 'BillingPayment', required: false, index: true },
     idempotencyKey: { type: String, required: true, trim: true },
-    provider: { type: String, enum: ['paynow', 'cash', 'manual'], required: true, index: true },
+    provider: { type: String, enum: ['paynow', 'dodo', 'cash', 'manual'], required: true, index: true },
     providerRef: { type: String, trim: true, index: true },
+    providerTransactionId: { type: String, trim: true, index: true },
+    providerCustomerId: { type: String, trim: true },
+    providerSubscriptionId: { type: String, trim: true, index: true },
     pollUrl: { type: String, trim: true },
     plan: { type: String, enum: ['INDIVIDUAL', 'SME', 'ENTERPRISE'], required: true },
-    billingCycle: { type: String, enum: ['monthly', 'yearly'], required: true },
+    billingCycle: { type: String, enum: ['monthly', 'quarterly', 'yearly'], required: true },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, enum: ['USD', 'ZWL'], default: 'USD' },
     status: {

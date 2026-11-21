@@ -102,6 +102,23 @@ function landlordPropertyIds(userId, companyHint) {
         return rows.map((row) => row._id);
     });
 }
+function unassignedCompanyOwnerIds(companyId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const cid = new mongoose_1.default.Types.ObjectId(companyId);
+        const [owners, linkedRows] = yield Promise.all([
+            PropertyOwner_1.PropertyOwner.find({ companyId: cid }).select('_id properties').lean(),
+            Property_1.Property.find({
+                companyId: cid,
+                isDeleted: { $ne: true },
+                propertyOwnerId: { $exists: true, $ne: null },
+            }).select('propertyOwnerId').lean(),
+        ]);
+        const linked = new Set(linkedRows.map((row) => String(row.propertyOwnerId)));
+        return owners
+            .filter((owner) => !(owner.properties || []).length && !linked.has(String(owner._id)))
+            .map((owner) => owner._id);
+    });
+}
 function propertyOwnerIdsForCaller(req) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
@@ -112,21 +129,27 @@ function propertyOwnerIdsForCaller(req) {
         const ids = yield propertyIdsForCaller(req);
         if (ids === 'company')
             return 'company';
-        if (!ids.length)
-            return [];
-        const fromLink = yield Property_1.Property.distinct('propertyOwnerId', {
-            _id: { $in: ids },
-            companyId: req.user.companyId,
-            propertyOwnerId: { $ne: null },
-        });
-        const fromArray = yield PropertyOwner_1.PropertyOwner.find({
-            companyId: req.user.companyId,
-            properties: { $in: ids },
-        }).distinct('_id');
         const merged = new Map();
-        for (const id of [...fromLink, ...fromArray]) {
-            if (id)
+        if (ids.length) {
+            const fromLink = yield Property_1.Property.distinct('propertyOwnerId', {
+                _id: { $in: ids },
+                companyId: req.user.companyId,
+                propertyOwnerId: { $ne: null },
+            });
+            const fromArray = yield PropertyOwner_1.PropertyOwner.find({
+                companyId: req.user.companyId,
+                properties: { $in: ids },
+            }).distinct('_id');
+            for (const id of [...fromLink, ...fromArray]) {
+                if (id)
+                    merged.set(String(id), id);
+            }
+        }
+        const roles = (0, access_1.getUserRoles)(req);
+        if (roles.some((role) => role === 'agent' || role === 'sales')) {
+            for (const id of yield unassignedCompanyOwnerIds(req.user.companyId)) {
                 merged.set(String(id), id);
+            }
         }
         return [...merged.values()];
     });
@@ -170,8 +193,10 @@ function callerCanMutatePropertyOwner(req, ownerId) {
         }).select('_id').lean();
         for (const row of rows)
             linked.add(String(row._id));
+        // An unassigned landlord has no other agent's property on the record, so the
+        // company's agents may complete the profile and assign the first property.
         if (!linked.size)
-            return false;
+            return (0, access_1.hasAnyRole)(req, ['agent', 'sales']);
         for (const id of linked) {
             if (!visibleSet.has(id))
                 return false;

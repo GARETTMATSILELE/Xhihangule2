@@ -117,23 +117,35 @@ function buildTaxPosition(input) {
         unallocatedPayments = round(unallocatedPayments + round(payment.unallocatedAmount || 0));
     }
     const buckets = new Map();
-    const ensure = (taxType, propertyId, propertyName) => {
+    const ensure = (taxType, propertyId, propertyName, propertyAddress) => {
         if (!buckets.has(taxType))
             buckets.set(taxType, new Map());
         const byProperty = buckets.get(taxType);
         const existing = byProperty.get(propertyId);
+        const address = String(propertyAddress || '').trim();
         if (existing) {
             if (existing.propertyName === propertyId && propertyName && propertyName !== propertyId)
                 existing.propertyName = propertyName;
+            if (!existing.propertyAddress && address)
+                existing.propertyAddress = address;
             return existing;
         }
-        const created = { propertyId, propertyName: propertyName || propertyId, recognised: 0, paid: 0, outstanding: 0, reversed: 0, lines: [] };
+        const created = {
+            propertyId,
+            propertyName: propertyName || propertyId,
+            propertyAddress: address,
+            recognised: 0,
+            paid: 0,
+            outstanding: 0,
+            reversed: 0,
+            lines: []
+        };
         byProperty.set(propertyId, created);
         return created;
     };
     for (const row of obligations) {
         const key = propertyKey(row.propertyId);
-        const bucket = ensure(row.taxType, key, row.propertyName || key);
+        const bucket = ensure(row.taxType, key, row.propertyName || key, row.propertyAddress);
         if (!(0, exports.isActiveObligation)(row)) {
             if (String(row.status) === 'REVERSED' && !row.reversalOf) {
                 bucket.reversed = round(bucket.reversed + round(row.taxAmount));
@@ -167,7 +179,7 @@ function buildTaxPosition(input) {
             const taxType = canonicalOfLegacy(row.taxType);
             const key = `${taxType}|${propertyKey(row.propertyId)}`;
             target.set(key, round((target.get(key) || 0) + round(row.amount)));
-            ensure(taxType, propertyKey(row.propertyId), row.propertyName || propertyKey(row.propertyId));
+            ensure(taxType, propertyKey(row.propertyId), row.propertyName || propertyKey(row.propertyId), row.propertyAddress);
         }
     };
     addLegacy(input.legacyRecords, legacyRecognised);

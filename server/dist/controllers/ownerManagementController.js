@@ -18,6 +18,9 @@ const errorHandler_1 = require("../middleware/errorHandler");
 const PropertyOwner_1 = require("../models/PropertyOwner");
 const Company_1 = require("../models/Company");
 const propertyFinancialSnapshotService_1 = require("../services/propertyFinancialSnapshotService");
+const propertyAccess_1 = require("../utils/propertyAccess");
+const propertyOwnerGuards_1 = require("../services/propertyOwnerGuards");
+const ownerRetirementService_1 = require("../services/ownerRetirementService");
 const ownerManagementService_1 = require("../services/ownerManagementService");
 const ctx = (req) => {
     const user = req.user;
@@ -31,12 +34,37 @@ const ownerIdParam = (req) => {
         throw new errorHandler_1.AppError('Invalid owner ID', 400);
     return String(id);
 };
+function requireReadableOwner(req, res, ownerId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (yield (0, propertyAccess_1.callerCanReadPropertyOwner)(req, ownerId))
+            return true;
+        res.status(404).json({ message: 'Property owner not found' });
+        return false;
+    });
+}
+function requireMutableOwner(req, res, ownerId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (yield (0, propertyAccess_1.callerCanMutatePropertyOwner)(req, ownerId))
+            return true;
+        res.status(404).json({ message: 'Property owner not found' });
+        return false;
+    });
+}
+function visiblePropertyScope(req) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const ids = yield (0, propertyAccess_1.propertyIdsForCaller)(req);
+        return ids === 'company' ? undefined : ids.map(String);
+    });
+}
 /** Same ledger snapshot as GET /accountants/property-accounts/:propertyId */
 const propertyLedgerSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
     const propertyId = req.params.propertyId;
     if (!propertyId || !mongoose_1.default.Types.ObjectId.isValid(propertyId)) {
         throw new errorHandler_1.AppError('Invalid property ID', 400);
+    }
+    if (!(yield (0, propertyAccess_1.callerCanAccessProperty)(req, propertyId))) {
+        return res.status(404).json({ message: 'Property not found' });
     }
     const ledger = req.query.ledger || 'rental';
     const snapshot = yield (0, propertyFinancialSnapshotService_1.getPropertyFinancialSnapshot)(propertyId, companyId, ledger);
@@ -45,40 +73,57 @@ const propertyLedgerSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, f
 exports.propertyLedgerSnapshot = propertyLedgerSnapshot;
 const ownersDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
+    const scope = yield (0, propertyAccess_1.propertyOwnerIdsForCaller)(req);
+    const ownerIds = scope === 'company' ? undefined : scope.map(String);
+    const visiblePropertyIds = yield visiblePropertyScope(req);
     const [kpis, owners] = yield Promise.all([
-        (0, ownerManagementService_1.getOwnersDashboard)(companyId),
-        (0, ownerManagementService_1.getOwnerListSummaries)(companyId),
+        (0, ownerManagementService_1.getOwnersDashboard)(companyId, ownerIds, visiblePropertyIds),
+        (0, ownerManagementService_1.getOwnerListSummaries)(companyId, ownerIds, visiblePropertyIds),
     ]);
     res.json(Object.assign(Object.assign({}, kpis), { owners }));
 });
 exports.ownersDashboard = ownersDashboard;
 const ownerPortfolio = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const data = yield (0, ownerManagementService_1.getOwnerPortfolio)(ownerIdParam(req), companyId);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const data = yield (0, ownerManagementService_1.getOwnerPortfolio)(ownerId, companyId, yield visiblePropertyScope(req));
     res.json(data);
 });
 exports.ownerPortfolio = ownerPortfolio;
 const ownerFinancials = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const data = yield (0, ownerManagementService_1.getOwnerFinancials)(ownerIdParam(req), companyId);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const data = yield (0, ownerManagementService_1.getOwnerFinancials)(ownerId, companyId, yield visiblePropertyScope(req));
     res.json(data);
 });
 exports.ownerFinancials = ownerFinancials;
 const ownerMaintenance = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const data = yield (0, ownerManagementService_1.getOwnerMaintenance)(ownerIdParam(req), companyId);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const data = yield (0, ownerManagementService_1.getOwnerMaintenance)(ownerId, companyId, yield visiblePropertyScope(req));
     res.json(data);
 });
 exports.ownerMaintenance = ownerMaintenance;
 const ownerDocumentsList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const docs = yield (0, ownerManagementService_1.getOwnerDocuments)(ownerIdParam(req), companyId);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const docs = yield (0, ownerManagementService_1.getOwnerDocuments)(ownerId, companyId);
     res.json(docs);
 });
 exports.ownerDocumentsList = ownerDocumentsList;
 const ownerDocumentsUpload = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId, userId } = ctx(req);
     const ownerId = req.body.ownerId || ownerIdParam(req);
+    if (!(yield requireMutableOwner(req, res, ownerId)))
+        return;
     const doc = yield (0, ownerManagementService_1.uploadOwnerDocument)({
         ownerId,
         companyId,
@@ -94,33 +139,48 @@ const ownerDocumentsUpload = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.ownerDocumentsUpload = ownerDocumentsUpload;
 const ownerBankingUpsert = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const banking = yield (0, ownerManagementService_1.upsertOwnerBanking)(ownerIdParam(req), companyId, req.body);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireMutableOwner(req, res, ownerId)))
+        return;
+    const banking = yield (0, ownerManagementService_1.upsertOwnerBanking)(ownerId, companyId, req.body);
     res.json(banking);
 });
 exports.ownerBankingUpsert = ownerBankingUpsert;
 const ownerPreferencesUpsert = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const prefs = yield (0, ownerManagementService_1.upsertOwnerPreferences)(ownerIdParam(req), companyId, req.body);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireMutableOwner(req, res, ownerId)))
+        return;
+    const prefs = yield (0, ownerManagementService_1.upsertOwnerPreferences)(ownerId, companyId, req.body);
     res.json(prefs);
 });
 exports.ownerPreferencesUpsert = ownerPreferencesUpsert;
 const ownerProfileExtras = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const extras = yield (0, ownerManagementService_1.getOwnerProfileExtras)(ownerIdParam(req), companyId);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const extras = yield (0, ownerManagementService_1.getOwnerProfileExtras)(ownerId, companyId);
     res.json(extras);
 });
 exports.ownerProfileExtras = ownerProfileExtras;
 const ownerHistoryList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
-    const history = yield (0, ownerManagementService_1.getOwnershipHistory)(ownerIdParam(req), companyId);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const history = yield (0, ownerManagementService_1.getOwnershipHistory)(ownerId, companyId);
     res.json(history);
 });
 exports.ownerHistoryList = ownerHistoryList;
 const ownershipHistoryCreate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId, userId } = ctx(req);
+    const ownerId = req.body.ownerId || ownerIdParam(req);
+    if (!(yield requireMutableOwner(req, res, ownerId)))
+        return;
     const history = yield (0, ownerManagementService_1.addOwnershipHistory)({
         propertyId: req.body.propertyId,
-        ownerId: req.body.ownerId || ownerIdParam(req),
+        ownerId,
         companyId,
         userId: userId,
         startDate: req.body.startDate,
@@ -133,6 +193,9 @@ const ownershipHistoryCreate = (req, res) => __awaiter(void 0, void 0, void 0, f
 exports.ownershipHistoryCreate = ownershipHistoryCreate;
 const propertyOwnershipHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
+    if (!req.params.propertyId || !(yield (0, propertyAccess_1.callerCanAccessProperty)(req, req.params.propertyId))) {
+        return res.status(404).json({ message: 'Property not found' });
+    }
     const history = yield (0, ownerManagementService_1.getPropertyOwnershipHistory)(req.params.propertyId, companyId);
     res.json(history);
 });
@@ -140,25 +203,32 @@ exports.propertyOwnershipHistory = propertyOwnershipHistory;
 const ownerDocumentPdf = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
     const type = (req.params.docType || 'owner-statement');
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
     const company = yield Company_1.Company.findById(companyId).select('name').lean();
     const pdf = yield (0, ownerManagementService_1.generateOwnerDocument)({
         type,
-        ownerId: ownerIdParam(req),
+        ownerId,
         companyId,
         companyName: (company === null || company === void 0 ? void 0 : company.name) || 'Company',
+        visiblePropertyIds: yield visiblePropertyScope(req),
     });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${type}-${ownerIdParam(req)}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${type}-${ownerId}.pdf"`);
     res.send(pdf);
 });
 exports.ownerDocumentPdf = ownerDocumentPdf;
 const ownerFullProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
     const ownerId = ownerIdParam(req);
+    if (!(yield requireReadableOwner(req, res, ownerId)))
+        return;
+    const visiblePropertyIds = yield visiblePropertyScope(req);
     const [portfolio, financials, maintenance, documents, history, extras] = yield Promise.all([
-        (0, ownerManagementService_1.getOwnerPortfolio)(ownerId, companyId),
-        (0, ownerManagementService_1.getOwnerFinancials)(ownerId, companyId),
-        (0, ownerManagementService_1.getOwnerMaintenance)(ownerId, companyId),
+        (0, ownerManagementService_1.getOwnerPortfolio)(ownerId, companyId, visiblePropertyIds),
+        (0, ownerManagementService_1.getOwnerFinancials)(ownerId, companyId, visiblePropertyIds),
+        (0, ownerManagementService_1.getOwnerMaintenance)(ownerId, companyId, visiblePropertyIds),
         (0, ownerManagementService_1.getOwnerDocuments)(ownerId, companyId),
         (0, ownerManagementService_1.getOwnershipHistory)(ownerId, companyId),
         (0, ownerManagementService_1.getOwnerProfileExtras)(ownerId, companyId),
@@ -169,6 +239,9 @@ exports.ownerFullProfile = ownerFullProfile;
 /** Extend owner record with profile fields (non-destructive). */
 const ownerProfilePatch = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { companyId } = ctx(req);
+    const ownerId = ownerIdParam(req);
+    if (!(yield requireMutableOwner(req, res, ownerId)))
+        return;
     const allowed = [
         'firstName', 'lastName', 'email', 'phone', 'nationalId', 'passportNumber',
         'taxNumber', 'address', 'active',
@@ -178,9 +251,44 @@ const ownerProfilePatch = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (req.body[key] !== undefined)
             updates[key] = req.body[key];
     }
-    const owner = yield PropertyOwner_1.PropertyOwner.findOneAndUpdate({ _id: ownerIdParam(req), companyId }, { $set: updates }, { new: true, runValidators: true }).select('-password');
+    for (const key of ['firstName', 'lastName', 'email', 'phone']) {
+        if (updates[key] !== undefined && !String(updates[key]).trim()) {
+            return res.status(400).json({ message: `${key} cannot be empty` });
+        }
+    }
+    const contactError = (0, propertyOwnerGuards_1.validateOwnerContact)({
+        email: updates.email,
+        phone: updates.phone,
+    });
+    if (contactError)
+        return res.status(400).json({ message: contactError });
+    if (typeof updates.email === 'string')
+        updates.email = updates.email.trim().toLowerCase();
+    const existing = yield PropertyOwner_1.PropertyOwner.findOne({ _id: ownerId, companyId }).select('email firstName lastName');
+    if (!existing)
+        return res.status(404).json({ message: 'Property owner not found' });
+    if (updates.email) {
+        const duplicate = yield PropertyOwner_1.PropertyOwner.findOne({
+            email: updates.email,
+            companyId,
+            _id: { $ne: existing._id },
+        }).select('_id');
+        if (duplicate)
+            return res.status(400).json({ message: 'Property owner with this email already exists' });
+    }
+    const owner = yield PropertyOwner_1.PropertyOwner.findOneAndUpdate({ _id: ownerId, companyId }, { $set: updates }, { new: true, runValidators: true }).select('-password -tokens');
     if (!owner)
-        throw new errorHandler_1.AppError('Property owner not found', 404);
+        return res.status(404).json({ message: 'Property owner not found' });
+    yield (0, ownerRetirementService_1.syncOwnerPortalProfile)({
+        previousEmail: existing.email,
+        companyId,
+        email: typeof updates.email === 'string' ? updates.email : undefined,
+        firstName: typeof updates.firstName === 'string' ? updates.firstName : undefined,
+        lastName: typeof updates.lastName === 'string' ? updates.lastName : undefined,
+    });
+    if (typeof updates.active === 'boolean') {
+        yield (0, ownerRetirementService_1.setOwnerActiveState)(ownerId, companyId, updates.active);
+    }
     res.json(owner);
 });
 exports.ownerProfilePatch = ownerProfilePatch;

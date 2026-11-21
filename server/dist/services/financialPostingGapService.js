@@ -24,6 +24,8 @@ const AccountingException_1 = require("../models/AccountingException");
 const PropertyAccount_1 = __importDefault(require("../models/PropertyAccount"));
 const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const money_1 = require("../utils/money");
+const paymentAccountingReconciliation_1 = require("./paymentAccountingReconciliation");
+const accountingIntegrityClassification_1 = require("./accountingIntegrityClassification");
 const money = (value) => (0, money_1.roundMoney)(Number(value || 0));
 function gap(payment, missingRecord, issueType) {
     const companyId = String(payment.companyId || '');
@@ -50,7 +52,7 @@ function detectFinancialPostingGaps(companyId_1) {
 }
 function inspectFinancialPostingGaps(companyId_1) {
     return __awaiter(this, arguments, void 0, function* (companyId, limit = 200) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d, _e, _f, _g, _h;
         if (!mongoose_1.default.Types.ObjectId.isValid(companyId))
             return { findings: [], scannedPaymentIds: [] };
         const companyObjectId = new mongoose_1.default.Types.ObjectId(companyId);
@@ -60,7 +62,7 @@ function inspectFinancialPostingGaps(companyId_1) {
             status: { $in: ['completed', 'reversed'] },
             isProvisional: { $ne: true }
         })
-            .select('_id companyId referenceNumber amount status accountingComplete accountingStatus reversalState reversalOfPaymentId commissionDetails paymentType depositAmount')
+            .select('_id companyId referenceNumber amount status accountingComplete accountingStatus reversalState reversalOfPaymentId commissionDetails paymentType depositAmount levyAllocated rentalPeriodMonth rentalPeriodYear')
             .sort({ updatedAt: -1 })
             .limit(Math.max(1, Math.min(limit, 200)))
             .lean();
@@ -108,15 +110,52 @@ function inspectFinancialPostingGaps(companyId_1) {
                     status: 'posted',
                     sourceId: { $ne: paymentId }
                 }).select('sourceId companyId').lean();
-                findings.push(gap(payment, otherPaymentJournal ? 'receipt journal belongs to another payment' : 'accounting journal', otherPaymentJournal
-                    ? 'JOURNAL_REFERENCE_COLLISION'
-                    : (payment.accountingComplete === true ? 'ACCOUNTING_COMPLETE_WITHOUT_JOURNAL' : 'MISSING_JOURNAL')));
+                if (otherPaymentJournal) {
+                    findings.push(gap(payment, 'receipt journal belongs to another payment', 'JOURNAL_REFERENCE_COLLISION'));
+                }
+                else if (payment.accountingComplete === true) {
+                    findings.push(gap(payment, 'accounting journal', 'ACCOUNTING_COMPLETE_WITHOUT_JOURNAL'));
+                }
+                else {
+                    const actual = yield (0, paymentAccountingReconciliation_1.loadAccountingActualSnapshot)(payment);
+                    const ownerExpected = money((_e = payment.commissionDetails) === null || _e === void 0 ? void 0 : _e.ownerAmount) > 0;
+                    const agentExpected = money((_f = payment.commissionDetails) === null || _f === void 0 ? void 0 : _f.agentShare) > 0;
+                    const companyExpected = money((_g = payment.commissionDetails) === null || _g === void 0 ? void 0 : _g.agencyShare) > 0;
+                    const ownerMissing = ownerExpected && !actual.ownerIncome;
+                    const agentMissing = agentExpected && !actual.agentCommission;
+                    const companyMissing = companyExpected && !actual.companyCommission;
+                    const period = `${payment.rentalPeriodYear || '?'}-${payment.rentalPeriodMonth || '?'}`;
+                    const reference = String(payment.referenceNumber || paymentId);
+                    if (ownerMissing || agentMissing || companyMissing) {
+                        const parts = [
+                            `Rental receipt exists`,
+                            `reference ${reference}`,
+                            `rental period ${period}`,
+                            ownerMissing ? 'owner income posting missing' : '',
+                            agentMissing ? 'agent commission posting missing' : '',
+                            companyMissing ? 'company commission posting missing' : '',
+                            'receipt journal missing'
+                        ].filter(Boolean);
+                        findings.push(gap(payment, parts.join('; '), 'UNPOSTED_RENTAL'));
+                    }
+                    else if (payment.accountingComplete == null && !payment.accountingStatus) {
+                        const zeroNote = (0, accountingIntegrityClassification_1.legitimateZeroOwnerIncome)(payment)
+                            ? ' Owner income is not applicable because the stored snapshot calculates zero.'
+                            : '';
+                        findings.push(gap(payment, `historical receipt journal${zeroNote}`, 'HISTORICAL_JOURNAL_GAP'));
+                    }
+                    else {
+                        findings.push(gap(payment, 'accounting journal', 'MISSING_JOURNAL'));
+                    }
+                }
             }
             if (vat > 0 && !vatByPayment.get(paymentId) && activeObligations.length > 0) {
                 findings.push(gap(payment, 'VAT collection record', 'VAT_COLLECTION_WITHOUT_RECORD'));
             }
             if (vat > 0 && activeObligations.length === 0 && !originalObligations.some((row) => row.status === 'REVERSED')) {
-                findings.push(gap(payment, 'VAT tax obligation', 'MISSING_TAX_OBLIGATION'));
+                const obligationGap = gap(payment, 'VAT tax obligation', 'MISSING_TAX_OBLIGATION');
+                obligationGap.amount = vat;
+                findings.push(obligationGap);
             }
             if (originalObligations.length > 1) {
                 findings.push(gap(payment, 'original VAT tax obligation', 'DUPLICATE_ORIGINAL_OBLIGATION'));
@@ -143,11 +182,11 @@ function inspectFinancialPostingGaps(companyId_1) {
             }
             const tracked = payment.accountingComplete != null || Boolean(payment.accountingStatus);
             if (tracked && policy.allowed && !policy.skipOwnerIncome && money(payment.amount) > 0) {
-                const ownerAmount = money((_e = payment.commissionDetails) === null || _e === void 0 ? void 0 : _e.ownerAmount);
-                if (ownerAmount <= 0) {
+                const ownerAmount = money((_h = payment.commissionDetails) === null || _h === void 0 ? void 0 : _h.ownerAmount);
+                if (ownerAmount <= 0 && !(0, accountingIntegrityClassification_1.legitimateZeroOwnerIncome)(payment)) {
                     findings.push(gap(payment, 'owner income amount', 'OWNER_INCOME_AMOUNT_MISSING'));
                 }
-                else {
+                else if (ownerAmount > 0) {
                     const income = yield PropertyAccount_1.default.findOne({
                         'transactions.idempotencyKey': `payment:${paymentId}`
                     }).select('_id').lean();

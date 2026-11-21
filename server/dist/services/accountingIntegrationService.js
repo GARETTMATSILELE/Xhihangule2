@@ -31,6 +31,7 @@ const JournalLine_1 = require("../models/JournalLine");
 const ChartOfAccount_1 = require("../models/ChartOfAccount");
 const testFailureSeam_1 = require("./testFailureSeam");
 const logger_1 = require("../utils/logger");
+const vatPolicyService_1 = require("./vatPolicyService");
 const operationalFailure_1 = require("./operationalFailure");
 const financialOperationVisibility_1 = require("./financialOperationVisibility");
 const journalDuplicateKey_1 = require("./journalDuplicateKey");
@@ -122,7 +123,7 @@ class AccountingIntegrationService {
                     $setOnInsert: {
                         vatCollected: totalVatCollected,
                         vatPaid: 0,
-                        vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                        vatRate: (0, vatPolicyService_1.authoritativeSnapshotVatRate)(payment),
                         filingPeriod: filingPeriodFromDate(payment.paymentDate),
                         status: 'pending'
                     }
@@ -137,17 +138,17 @@ class AccountingIntegrationService {
     }
     ensurePaymentVatObligations(payment, opts) {
         return __awaiter(this, void 0, void 0, function* () {
-            var _a, _b, _c, _d, _e;
+            var _a, _b, _c, _d;
             const companyId = String(payment.companyId);
             const paymentId = String(payment._id);
             const vatOnCommission = toMoney(((_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) || 0);
             const paymentVat = toMoney((payment === null || payment === void 0 ? void 0 : payment.vatAmount) || 0);
             const commissionNet = toMoney(Number(((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.commissionNet) || ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.totalCommission) || 0));
-            const effectiveVatRate = Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || ((_d = payment.commissionDetails) === null || _d === void 0 ? void 0 : _d.vatRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0);
+            const effectiveVatRate = (0, vatPolicyService_1.authoritativeSnapshotVatRate)(payment);
             const propertyId = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : undefined;
             const period = (0, vatCalculation_1.filingPeriodFromDate)(payment.paymentDate);
             const details = (payment.commissionDetails || {});
-            if (vatOnCommission > 0) {
+            if (vatOnCommission > 0 && (opts === null || opts === void 0 ? void 0 : opts.allowCommissionVatObligation) !== false) {
                 (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, String(payment.notes || ''), 'PHASE_FAIL_OBLIGATION_ONCE');
                 if (process.env.NODE_ENV !== 'production' &&
                     process.env.MANTIS_TEST_SEAM === '1' &&
@@ -172,7 +173,7 @@ class AccountingIntegrationService {
                         commissionRate: details.commissionRate,
                         commissionNet,
                         vatTreatment: details.vatTreatment,
-                        vatRate: (_e = details.vatRate) !== null && _e !== void 0 ? _e : effectiveVatRate,
+                        vatRate: (_d = details.vatRate) !== null && _d !== void 0 ? _d : effectiveVatRate,
                         vatAmount: vatOnCommission,
                         vatRuleId: details.vatRuleId,
                         vatTaxPoint: details.vatTaxPoint || payment.paymentDate,
@@ -318,7 +319,22 @@ class AccountingIntegrationService {
                 const paymentVat = toMoney((payment === null || payment === void 0 ? void 0 : payment.vatAmount) || 0);
                 const totalVatCollected = toMoney(vatOnCommission + paymentVat);
                 const commissionNet = toMoney(Number(((_b = payment.commissionDetails) === null || _b === void 0 ? void 0 : _b.commissionNet) || ((_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.totalCommission) || 0));
-                const effectiveVatRate = Number((payment === null || payment === void 0 ? void 0 : payment.vatOnCommissionRate) || (payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0);
+                const commissionVatDecision = vatOnCommission > 0
+                    ? yield (0, vatPolicyService_1.assessVatPayableJournal)({
+                        payment,
+                        approveHistoricalVatObligation: (opts === null || opts === void 0 ? void 0 : opts.approveHistoricalVatObligation) === true
+                    })
+                    : { recognise: false, reason: 'no_commission_vat', amount: 0, rate: 0 };
+                const allowCommissionVat = commissionVatDecision.recognise;
+                if (vatOnCommission > 0 && !allowCommissionVat) {
+                    return {
+                        receiptJournal: 'skipped',
+                        reason: vatPolicyService_1.HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED,
+                        vatObligationSkipped: commissionVatDecision.reason
+                    };
+                }
+                const effectiveVatRate = allowCommissionVat ? commissionVatDecision.rate : (0, vatPolicyService_1.authoritativeSnapshotVatRate)(payment);
+                const recognisedVat = allowCommissionVat ? commissionVatDecision.amount : 0;
                 const propertyId = (payment === null || payment === void 0 ? void 0 : payment.propertyId) ? String(payment.propertyId) : undefined;
                 const agentId = (payment === null || payment === void 0 ? void 0 : payment.agentId) ? String(payment.agentId) : undefined;
                 const levyAmount = toMoney(Number((_f = (_e = (_d = payment.commissionDetails) === null || _d === void 0 ? void 0 : _d.levy) !== null && _e !== void 0 ? _e : payment === null || payment === void 0 ? void 0 : payment.levyAllocated) !== null && _f !== void 0 ? _f : 0));
@@ -336,7 +352,7 @@ class AccountingIntegrationService {
                     amount,
                     ownerAmount: allocation.ownerPayable,
                     commissionNet: allocation.commissionNet,
-                    vatAmount: totalVatCollected,
+                    vatAmount: vatOnCommission > 0 ? recognisedVat : paymentVat,
                     levyAmount: domainPaymentType === 'sale' ? 0 : allocation.levyPayable,
                     propertyId,
                     agentId
@@ -350,6 +366,10 @@ class AccountingIntegrationService {
                     throw new Error(`Journal is unbalanced. debit=${debit}, credit=${credit}`);
                 }
                 yield assertReceiptReferenceOwnedByPayment(companyObjectId, receiptReference, paymentId);
+                const existingVatRecord = yield VatRecord_1.VatRecord.findOne({
+                    companyId: companyObjectId,
+                    transactionId: paymentId
+                }).select('_id').lean();
                 if (amount > 0 && receiptJournal.lines.length > 0) {
                     yield ensureJournal({
                         companyId: companyObjectId,
@@ -366,21 +386,35 @@ class AccountingIntegrationService {
                         createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
                         lines: receiptJournal.lines,
                         seamHaystack: String(payment.notes || ''),
-                        vat: totalVatCollected > 0
+                        vat: !existingVatRecord && allowCommissionVat && recognisedVat > 0
                             ? {
                                 sourceType: payment.paymentType,
-                                vatCollected: totalVatCollected,
+                                vatCollected: recognisedVat,
                                 vatRate: effectiveVatRate,
                                 filingPeriod: filingPeriodFromDate(payment.paymentDate),
                                 status: 'pending'
                             }
-                            : undefined
+                            : !existingVatRecord && paymentVat > 0 && vatOnCommission <= 0
+                                ? {
+                                    sourceType: payment.paymentType,
+                                    vatCollected: paymentVat,
+                                    vatRate: Number((payment === null || payment === void 0 ? void 0 : payment.vatRate) || 0),
+                                    filingPeriod: filingPeriodFromDate(payment.paymentDate),
+                                    status: 'pending'
+                                }
+                                : undefined
                     }));
                 }
-                if (totalVatCollected > 0) {
+                if (allowCommissionVat && vatOnCommission > 0) {
                     yield this.upsertPaymentVatRecord(payment);
                 }
-                yield this.ensurePaymentVatObligations(payment, opts);
+                else if (paymentVat > 0 && vatOnCommission <= 0) {
+                    yield this.upsertPaymentVatRecord(payment);
+                }
+                yield this.ensurePaymentVatObligations(payment, {
+                    createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
+                    allowCommissionVatObligation: allowCommissionVat
+                });
                 const agentShare = toMoney(((_l = payment.commissionDetails) === null || _l === void 0 ? void 0 : _l.agentShare) || 0);
                 if (agentShare > 0) {
                     const commissionReference = `COM-${payment.referenceNumber || paymentId}`;
@@ -408,7 +442,10 @@ class AccountingIntegrationService {
                         ]
                     }));
                 }
-                return { receiptJournal: 'posted' };
+                return {
+                    receiptJournal: 'posted',
+                    vatObligationSkipped: vatOnCommission > 0 && !allowCommissionVat ? commissionVatDecision.reason : undefined
+                };
             }
             catch (error) {
                 const failureClass = (0, operationalFailure_1.classifyOperationalFailure)(error);

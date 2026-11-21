@@ -48,6 +48,10 @@ import {
   rejectHistoricalVatReceipt
 } from '../controllers/historicalVatRecognitionController';
 import {
+  getHistoricalAccountingDryRun,
+  executeHistoricalAccountingRepairReceipt
+} from '../controllers/historicalAccountingReconciliationController';
+import {
   getPropertyTransactions,
   getPropertyAccount,
   addExpense,
@@ -210,6 +214,8 @@ router.post('/accounting-integrity/ledger-events/:id/retry', canViewAccountantDa
 router.get('/historical-vat/schedule', isAccountant, getHistoricalVatSchedule);
 router.post('/historical-vat/:id/recognise', isAccountant, recogniseHistoricalVatReceipt);
 router.post('/historical-vat/:id/reject', isAccountant, rejectHistoricalVatReceipt);
+router.get('/historical-accounting/dry-run', isAccountant, getHistoricalAccountingDryRun);
+router.post('/historical-accounting/:id/repair', isAccountant, executeHistoricalAccountingRepairReceipt);
 router.put('/payments/:id/status', canManagePayments, updatePaymentStatus);
 router.post('/payments/:id/reverse', canManagePayments, reversePayment);
 router.post('/payments/:id/finalize', canManagePayments, finalizeProvisionalPayment);

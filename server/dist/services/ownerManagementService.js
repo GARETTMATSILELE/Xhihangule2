@@ -50,9 +50,11 @@ function resolveOwnerPropertyIds(ownerId, companyId) {
         const cid = new mongoose_1.default.Types.ObjectId(companyId);
         const oid = owner._id;
         const fromOwnerArray = (owner.properties || []).map((p) => new mongoose_1.default.Types.ObjectId(String(p)));
+        // Property.ownerId is the managing agent (User), not the landlord.
+        // Matching it here would treat an agent id as a PropertyOwner id.
         const fromPropertyOwnerId = yield Property_1.Property.find({
             companyId: cid,
-            $or: [{ ownerId: oid }, { propertyOwnerId: oid }],
+            propertyOwnerId: oid,
             isDeleted: { $ne: true },
         }).select('_id');
         const idSet = new Set();
@@ -61,66 +63,89 @@ function resolveOwnerPropertyIds(ownerId, companyId) {
         return Array.from(idSet).map((id) => new mongoose_1.default.Types.ObjectId(id));
     });
 }
-function getOwnersDashboard(companyId) {
+function propertiesForOwner(owner, properties) {
+    const wanted = new Set((owner.properties || []).map((id) => String(id)));
+    const ownerId = String(owner._id);
+    return properties.filter((property) => wanted.has(String(property._id))
+        || String(property.propertyOwnerId || '') === ownerId);
+}
+function restrictProperties(properties, visiblePropertyIds) {
+    if (!visiblePropertyIds)
+        return properties;
+    const allowed = new Set(visiblePropertyIds.map(String));
+    return properties.filter((property) => allowed.has(String(property._id)));
+}
+function limitToOwnerIds(owners, ownerIds) {
+    if (!ownerIds)
+        return owners;
+    const allowed = new Set(ownerIds.map(String));
+    return owners.filter((owner) => allowed.has(String(owner._id)));
+}
+function getOwnersDashboard(companyId, ownerIds, visiblePropertyIds) {
     return __awaiter(this, void 0, void 0, function* () {
         const cid = new mongoose_1.default.Types.ObjectId(companyId);
-        const owners = yield PropertyOwner_1.PropertyOwner.find({ companyId: cid }).select('-password').lean();
-        const properties = yield Property_1.Property.find({ companyId: cid, isDeleted: { $ne: true } }).lean();
+        const owners = limitToOwnerIds(yield PropertyOwner_1.PropertyOwner.find({ companyId: cid }).select('-password -tokens').lean(), ownerIds);
+        const properties = yield Property_1.Property.find({ companyId: cid, isDeleted: { $ne: true } })
+            .select('_id status occupiedUnits rent currentArrears propertyOwnerId')
+            .lean();
         const ownerPropertyIds = new Set();
         for (const owner of owners) {
-            const ids = yield resolveOwnerPropertyIds(String(owner._id), companyId);
-            ids.forEach((id) => ownerPropertyIds.add(String(id)));
+            restrictProperties(propertiesForOwner(owner, properties), visiblePropertyIds)
+                .forEach((property) => ownerPropertyIds.add(String(property._id)));
         }
         const ownerProps = properties.filter((p) => ownerPropertyIds.has(String(p._id)));
         const occupied = ownerProps.filter((p) => p.status === 'rented' || (p.occupiedUnits && p.occupiedUnits > 0)).length;
         const vacant = Math.max(0, ownerProps.length - occupied);
         const propertyIds = ownerProps.map((p) => p._id);
-        const maintenancePending = yield MaintenanceRequest_1.MaintenanceRequest.countDocuments({
-            companyId: cid,
-            propertyId: { $in: propertyIds },
-            status: { $in: APPROVAL_STATUSES },
-        });
+        const approvalRows = propertyIds.length
+            ? yield MaintenanceRequest_1.MaintenanceRequest.find({
+                companyId: cid,
+                propertyId: { $in: propertyIds },
+                status: { $in: APPROVAL_STATUSES },
+            }).select('propertyId').lean()
+            : [];
+        const approvalPropertyIds = new Set(approvalRows.map((row) => String(row.propertyId)));
+        const ownersAwaitingApproval = owners.filter((owner) => restrictProperties(propertiesForOwner(owner, ownerProps), visiblePropertyIds)
+            .some((property) => approvalPropertyIds.has(String(property._id)))).length;
         const outstandingBalance = ownerProps.reduce((s, p) => s + Number(p.currentArrears || 0), 0);
-        const ownersWithBalance = owners.filter((o) => {
-            const props = ownerProps.filter((p) => String(p.ownerId) === String(o._id) || (o.properties || []).some((pid) => String(pid) === String(p._id)));
-            return props.some((p) => Number(p.currentArrears || 0) > 0);
-        }).length;
+        const ownersWithBalance = owners.filter((owner) => restrictProperties(propertiesForOwner(owner, ownerProps), visiblePropertyIds)
+            .some((property) => Number(property.currentArrears || 0) > 0)).length;
         return {
             kpis: {
                 totalOwners: owners.length,
                 totalProperties: ownerProps.length,
                 occupiedProperties: occupied,
                 vacantProperties: vacant,
-                ownersAwaitingApproval: maintenancePending,
+                ownersAwaitingApproval,
                 ownersWithOutstandingBalances: ownersWithBalance,
                 totalOutstandingBalance: outstandingBalance,
             },
         };
     });
 }
-function getOwnerListSummaries(companyId) {
+function getOwnerListSummaries(companyId, ownerIds, visiblePropertyIds) {
     return __awaiter(this, void 0, void 0, function* () {
         const cid = new mongoose_1.default.Types.ObjectId(companyId);
-        const owners = yield PropertyOwner_1.PropertyOwner.find({ companyId: cid }).select('-password').lean();
-        const allProperties = yield Property_1.Property.find({ companyId: cid, isDeleted: { $ne: true } }).lean();
-        const allMaintenance = yield MaintenanceRequest_1.MaintenanceRequest.find({ companyId: cid }).lean();
-        return Promise.all(owners.map((owner) => __awaiter(this, void 0, void 0, function* () {
-            const propertyIds = yield resolveOwnerPropertyIds(String(owner._id), companyId);
-            const props = allProperties.filter((p) => propertyIds.some((id) => String(id) === String(p._id)));
-            const occupiedCount = props.filter((p) => p.status === 'rented').length;
+        const owners = limitToOwnerIds(yield PropertyOwner_1.PropertyOwner.find({ companyId: cid }).select('-password -tokens').lean(), ownerIds);
+        const allProperties = yield Property_1.Property.find({ companyId: cid, isDeleted: { $ne: true } })
+            .select('_id status occupiedUnits rent currentArrears propertyOwnerId')
+            .lean();
+        const allMaintenance = yield MaintenanceRequest_1.MaintenanceRequest.find({ companyId: cid }).select('propertyId status lastActivityAt updatedAt createdAt').lean();
+        const leaseRows = yield Lease_1.Lease.find({
+            companyId: cid,
+            status: 'active',
+            propertyId: { $in: allProperties.map((property) => property._id) },
+        }).select('propertyId rentAmount').lean();
+        const leaseRent = new Map(leaseRows.map((lease) => [String(lease.propertyId), Number(lease.rentAmount || 0)]));
+        return owners.map((owner) => {
+            const props = restrictProperties(propertiesForOwner(owner, allProperties), visiblePropertyIds);
+            const propertyIds = props.map((property) => property._id);
+            const occupiedCount = props.filter((p) => p.status === 'rented' || (p.occupiedUnits && p.occupiedUnits > 0)).length;
             const vacantCount = Math.max(0, props.length - occupiedCount);
-            const snapshots = yield (0, propertyFinancialSnapshotService_1.getPropertyFinancialSnapshots)(propertyIds, companyId);
-            const snapList = props
-                .map((p) => snapshots.get(String(p._id)))
-                .filter((s) => !!s);
-            const totals = snapList.length
-                ? (0, propertyFinancialSnapshotService_1.aggregateOwnerLedgerTotals)(snapList)
-                : {
-                    monthlyRevenue: props.reduce((s, p) => s + Number(p.rent || 0), 0),
-                    tenantArrears: props.reduce((s, p) => s + Number(p.currentArrears || 0), 0),
-                };
-            const monthlyRevenue = totals.monthlyRevenue;
-            const outstandingBalance = totals.tenantArrears;
+            // List rent and arrears use the same stored property and active-lease fields
+            // as the ledger snapshot. Opening this list does not read or create ledgers.
+            const monthlyRevenue = props.reduce((sum, property) => sum + Number(property.rent || leaseRent.get(String(property._id)) || 0), 0);
+            const outstandingBalance = props.reduce((sum, property) => sum + Number(property.currentArrears || 0), 0);
             const maint = allMaintenance.filter((m) => propertyIds.some((pid) => String(pid) === String(m.propertyId)));
             const pendingMaintenanceCount = maint.filter((m) => maintenanceStatus_1.OPEN_STATUSES.includes((0, maintenanceStatus_1.normalizeMaintenanceStatus)(m.status)) &&
                 !['closed', 'rejected', 'verified'].includes((0, maintenanceStatus_1.normalizeMaintenanceStatus)(m.status))).length;
@@ -143,16 +168,18 @@ function getOwnerListSummaries(companyId) {
                 outstandingBalance,
                 pendingMaintenanceCount,
                 lastActivity: new Date(lastActivity).toISOString(),
+                createdAt: owner.createdAt ? new Date(owner.createdAt).toISOString() : undefined,
             };
-        })));
+        });
     });
 }
-function getOwnerPortfolio(ownerId, companyId) {
+function getOwnerPortfolio(ownerId, companyId, visiblePropertyIds) {
     return __awaiter(this, void 0, void 0, function* () {
-        const owner = yield PropertyOwner_1.PropertyOwner.findOne({ _id: ownerId, companyId }).select('-password');
+        const owner = yield PropertyOwner_1.PropertyOwner.findOne({ _id: ownerId, companyId }).select('-password -tokens');
         if (!owner)
             throw new errorHandler_1.AppError('Property owner not found', 404);
-        const propertyIds = yield resolveOwnerPropertyIds(ownerId, companyId);
+        const propertyIds = (yield resolveOwnerPropertyIds(ownerId, companyId))
+            .filter((id) => !visiblePropertyIds || visiblePropertyIds.includes(String(id)));
         const properties = yield Property_1.Property.find({ _id: { $in: propertyIds }, companyId }).lean();
         const leases = yield Lease_1.Lease.find({ propertyId: { $in: propertyIds }, companyId, status: 'active' })
             .populate('tenantId', 'firstName lastName email')
@@ -205,9 +232,10 @@ function getOwnerPortfolio(ownerId, companyId) {
         };
     });
 }
-function getOwnerFinancials(ownerId, companyId) {
+function getOwnerFinancials(ownerId, companyId, visiblePropertyIds) {
     return __awaiter(this, void 0, void 0, function* () {
-        const propertyIds = yield resolveOwnerPropertyIds(ownerId, companyId);
+        const propertyIds = (yield resolveOwnerPropertyIds(ownerId, companyId))
+            .filter((id) => !visiblePropertyIds || visiblePropertyIds.includes(String(id)));
         const properties = yield Property_1.Property.find({ _id: { $in: propertyIds }, companyId }).lean();
         const snapshots = yield (0, propertyFinancialSnapshotService_1.getPropertyFinancialSnapshots)(propertyIds, companyId);
         const snapList = Array.from(snapshots.values());
@@ -244,9 +272,10 @@ function getOwnerFinancials(ownerId, companyId) {
         };
     });
 }
-function getOwnerMaintenance(ownerId, companyId) {
+function getOwnerMaintenance(ownerId, companyId, visiblePropertyIds) {
     return __awaiter(this, void 0, void 0, function* () {
-        const propertyIds = yield resolveOwnerPropertyIds(ownerId, companyId);
+        const propertyIds = (yield resolveOwnerPropertyIds(ownerId, companyId))
+            .filter((id) => !visiblePropertyIds || visiblePropertyIds.includes(String(id)));
         const requests = yield MaintenanceRequest_1.MaintenanceRequest.find({ companyId, propertyId: { $in: propertyIds } })
             .populate('propertyId', 'name address')
             .sort({ updatedAt: -1 })
@@ -367,9 +396,9 @@ function getPropertyOwnershipHistory(propertyId, companyId) {
 function generateOwnerDocument(input) {
     return __awaiter(this, void 0, void 0, function* () {
         const [portfolio, financials, maintenance, history] = yield Promise.all([
-            getOwnerPortfolio(input.ownerId, input.companyId),
-            getOwnerFinancials(input.ownerId, input.companyId),
-            getOwnerMaintenance(input.ownerId, input.companyId),
+            getOwnerPortfolio(input.ownerId, input.companyId, input.visiblePropertyIds),
+            getOwnerFinancials(input.ownerId, input.companyId, input.visiblePropertyIds),
+            getOwnerMaintenance(input.ownerId, input.companyId, input.visiblePropertyIds),
             getOwnershipHistory(input.ownerId, input.companyId),
         ]);
         const rows = [];

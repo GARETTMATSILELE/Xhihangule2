@@ -72,7 +72,7 @@ function main() {
         const company = yield Company_1.Company.create({
             name: 'Recovery Co', address: '1 Recovery Street', phone: '0770000301', email: 'recovery-co@example.test',
             registrationNumber: 'REC-1', tinNumber: 'REC-TIN', country: 'Zimbabwe', ownerId: user._id,
-            taxProfile: { vatRegistered: true, vatNumber: 'ZW-REC', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
+            taxProfile: { vatRegistered: true, vatNumber: 'ZW-REC', vatCategory: 'standard', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
         });
         const other = yield Company_1.Company.create({
             name: 'Other Recovery Co', address: '2 Recovery Street', phone: '0770000302', email: 'other-recovery@example.test',

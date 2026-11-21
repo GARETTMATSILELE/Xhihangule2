@@ -9,7 +9,11 @@ import { Company } from '../models/Company';
 import { activateSubscriptionFromPayment } from '../services/billingActivationService';
 import { enterpriseDirectCheckoutEnabled } from '../services/registrationPaymentPolicy';
 import { chargeForPlan, listDashboardPlans } from '../services/systemPlanService';
-import { initiatePaynowCheckout } from './paynowController';
+import { createPaynowSubscriptionProvider } from '../services/subscriptionPayments/paynowSubscriptionProvider';
+import { hostedCheckoutStarted, readProviderAvailability, selectSubscriptionProvider, SubscriptionCycle } from '../services/subscriptionPayments/providerAvailability';
+import { startDodoSubscriptionCheckout } from '../services/subscriptionPayments/subscriptionCheckoutService';
+import { reconcileDodoPayment } from '../services/subscriptionPayments/dodoWebhookService';
+import { subscriptionListPrice } from '../services/subscriptionPayments/dodoProductMap';
 import crypto from 'crypto';
 
 export const listPublicPlans = async (_req: Request, res: Response, next: (error: unknown) => void) => {
@@ -25,17 +29,21 @@ export const listPublicPlans = async (_req: Request, res: Response, next: (error
   }
 };
 
+export const listPaymentProviders = async (_req: Request, res: Response) => {
+  res.json({ providers: readProviderAvailability() });
+};
+
 export const getCheckoutSession = async (req: Request, res: Response) => {
   if (!req.user?.companyId) return res.status(401).json({ message: 'Unauthorized' });
   const requestedId = String(req.params.id || 'current');
   const query: Record<string, unknown> = {
     companyId: new mongoose.Types.ObjectId(req.user.companyId),
-    provider: 'paynow'
+    provider: { $in: ['paynow', 'dodo'] }
   };
   if (requestedId !== 'current') query._id = requestedId;
   const session = await PaymentSession.findOne(query).sort({ createdAt: -1 });
   if (!session) return res.status(404).json({ message: 'No checkout is waiting for this company', code: 'NO_CHECKOUT' });
-  const priced = await chargeForPlan(session.plan, session.billingCycle);
+  const priced = await subscriptionListPrice(session.plan, session.billingCycle);
   if (priced == null) {
     return res.status(503).json({ message: 'This plan does not have a configured price for the selected billing frequency', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
   }
@@ -46,24 +54,45 @@ export const getCheckoutSession = async (req: Request, res: Response) => {
     amount: priced,
     currency: session.currency || 'USD',
     status: session.status,
-    awaitingConfirmation: Boolean(session.pollUrl) && (session.status === 'pending' || session.status === 'provider_created')
+    provider: session.provider,
+    awaitingConfirmation: hostedCheckoutStarted(session)
   });
 };
 
 export const createCheckout = async (req: Request, res: Response) => {
-  const { plan, cycle }: { plan: Plan; cycle: 'monthly' | 'yearly' } = req.body || {};
+  const { plan, cycle }: { plan: Plan; cycle: SubscriptionCycle } = req.body || {};
   if (!req.user?.companyId) return res.status(401).json({ message: 'Unauthorized' });
   if (!plan || !['INDIVIDUAL','SME','ENTERPRISE'].includes(plan)) return res.status(400).json({ message: 'Invalid plan' });
-  if (!cycle || !['monthly','yearly'].includes(cycle)) return res.status(400).json({ message: 'Invalid cycle' });
+  if (!cycle || !['monthly','quarterly','yearly'].includes(cycle)) return res.status(400).json({ message: 'Invalid cycle' });
   if (plan === 'ENTERPRISE' && !enterpriseDirectCheckoutEnabled()) {
     return res.status(400).json({ message: 'Enterprise is arranged with sales. Direct checkout is not available.', code: 'ENTERPRISE_SALES_ONLY' });
+  }
+  const selection = selectSubscriptionProvider(req.body?.provider);
+  if (!selection.ok) return res.status(selection.status).json({ message: selection.message, code: selection.code });
+  if (selection.provider === 'paynow' && cycle === 'quarterly') {
+    return res.status(400).json({ message: 'Paynow subscription checkout does not bill quarterly.', code: 'CYCLE_NOT_SUPPORTED' });
   }
 
   const pendingRegistration = await PaymentSession.findOne({
     companyId: new mongoose.Types.ObjectId(req.user.companyId),
-    provider: 'paynow',
+    provider: { $in: ['paynow', 'dodo'] },
     status: { $in: ['pending', 'provider_created'] }
   }).sort({ createdAt: -1 });
+  if (pendingRegistration && pendingRegistration.provider !== selection.provider) {
+    if (hostedCheckoutStarted(pendingRegistration)) {
+      return res.status(409).json({
+        message: 'A payment attempt is already open. Finish or cancel it before choosing another provider.',
+        code: 'PAYMENT_ATTEMPT_PENDING',
+        provider: pendingRegistration.provider,
+        paymentSessionId: pendingRegistration._id
+      });
+    }
+    pendingRegistration.provider = selection.provider;
+    await pendingRegistration.save();
+    if (pendingRegistration.billingPaymentId) {
+      await BillingPayment.updateOne({ _id: pendingRegistration.billingPaymentId }, { $set: { provider: selection.provider } });
+    }
+  }
   if (pendingRegistration && (pendingRegistration.plan !== plan || pendingRegistration.billingCycle !== cycle)) {
     return res.status(409).json({
       message: 'Checkout does not match the plan and billing frequency selected at registration',
@@ -73,8 +102,12 @@ export const createCheckout = async (req: Request, res: Response) => {
       paymentSessionId: pendingRegistration._id
     });
   }
+  if (selection.provider === 'dodo') {
+    const started = await startDodoSubscriptionCheckout(req, { plan, cycle, openSession: pendingRegistration });
+    return res.status(started.status).json(started.body);
+  }
 
-  const amount = (await chargeForPlan(plan, cycle)) || 0;
+  const amount = (await chargeForPlan(plan, cycle === 'yearly' ? 'yearly' : 'monthly')) || 0;
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(503).json({ message: 'This plan does not have a configured price', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
   }
@@ -95,17 +128,24 @@ export const createCheckout = async (req: Request, res: Response) => {
       }
     }
     try {
-      const checkout = await initiatePaynowCheckout(req, {
+      const checkout = await createPaynowSubscriptionProvider(req).createCheckout({
         paymentSessionId: String(openSession._id),
+        companyId: String(req.user.companyId),
+        subscriptionId: String(openSession.subscriptionId || ''),
+        customerId: String(req.user.userId || ''),
+        customerEmail: '',
+        customerName: '',
         plan,
         cycle,
+        amount,
+        currency: 'USD',
         description: `Mantis ${plan} ${cycle} subscription`
       });
       return res.json({
         redirectUrl: checkout.redirectUrl,
         paymentId: openSession.billingPaymentId,
         paymentSessionId: openSession._id,
-        reference: checkout.reference,
+        reference: checkout.providerTransactionId,
         metadata: { companyId: req.user.companyId, userId: req.user.userId, plan, billingCycle: cycle }
       });
     } catch (e: any) {
@@ -166,11 +206,17 @@ export const createCheckout = async (req: Request, res: Response) => {
 
   let checkout;
   try {
-    checkout = await initiatePaynowCheckout(req, {
+    checkout = await createPaynowSubscriptionProvider(req).createCheckout({
       paymentSessionId: String(paymentSession._id),
+      companyId: String(req.user.companyId),
+      subscriptionId: String(subscription._id),
+      customerId: String(req.user.userId || ''),
+      customerEmail: '',
+      customerName: '',
       plan,
       cycle,
-      reference: ref,
+      amount,
+      currency: 'USD',
       description: `Mantis ${plan} ${cycle} subscription`
     });
   } catch (e: any) {
@@ -195,6 +241,14 @@ export const createCheckout = async (req: Request, res: Response) => {
       onboardingSessionId: paymentSession.onboardingSessionId
     }
   });
+};
+
+export const reconcileDodoCheckout = async (req: Request, res: Response) => {
+  if (!req.user?.companyId) return res.status(401).json({ message: 'Unauthorized' });
+  const paymentSessionId = String(req.body?.paymentSessionId || '');
+  if (!paymentSessionId) return res.status(400).json({ message: 'paymentSessionId is required', code: 'PAYMENT_SESSION_REQUIRED' });
+  const result = await reconcileDodoPayment(paymentSessionId, req.user.companyId, String(req.body?.paymentId || ''));
+  return res.status(result.status).json(result.body);
 };
 
 export const getPaymentStatus = async (req: Request, res: Response) => {

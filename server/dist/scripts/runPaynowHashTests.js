@@ -104,6 +104,21 @@ function main() {
         && links.pollUrl === responseFields.pollurl);
     const tampered = body.replace(/hash=[^&]+/, 'hash=' + 'B'.repeat(128));
     record('invalid response hash is rejected', (0, registrationPaymentPolicy_1.verifyPaynowPayload)((0, paynowHash_1.parsePaynowBody)(tampered), DOCUMENTED_KEY) === false);
+    record('ordinary sessions are not official Paynow tests', (0, registrationPaymentPolicy_1.isOfficialPaynowTestSession)({ paynowMode: 'live' }) === false && (0, registrationPaymentPolicy_1.officialPaynowTestAlreadyVerified)({}) === false);
+    record('an official test is recorded once', (0, registrationPaymentPolicy_1.isOfficialPaynowTestSession)({ officialPaynowTest: true }) === true
+        && (0, registrationPaymentPolicy_1.officialPaynowTestAlreadyVerified)({ officialPaynowTest: true }) === false
+        && (0, registrationPaymentPolicy_1.officialPaynowTestAlreadyVerified)({ officialPaynowTest: true, officialPaynowTestResult: { verified: true } }) === true);
+    const now = new Date('2026-11-10T12:30:00.000Z');
+    const pending = {
+        status: 'provider_created',
+        pollUrl: 'https://www.paynow.co.zw/Interface/CheckPayment/?guid=example',
+        createdAt: '2026-11-10T12:11:43.495Z',
+        metadata: { officialPaynowTest: true }
+    };
+    record('a pending Paynow session can be polled for recovery', (0, registrationPaymentPolicy_1.paynowRecoveryDecision)(pending, now).action === 'poll');
+    record('a verified official test is not polled again', (0, registrationPaymentPolicy_1.paynowRecoveryDecision)(Object.assign(Object.assign({}, pending), { metadata: { officialPaynowTest: true, officialPaynowTestResult: { verified: true } } }), now).action === 'skip');
+    record('completed and exhausted sessions are not polled', (0, registrationPaymentPolicy_1.paynowRecoveryDecision)(Object.assign(Object.assign({}, pending), { status: 'paid' }), now).action === 'skip'
+        && (0, registrationPaymentPolicy_1.paynowRecoveryDecision)(Object.assign(Object.assign({}, pending), { metadata: { paynowRecovery: { attempts: 8 } } }), now).action === 'skip');
     const failed = checks.filter((check) => !check.ok);
     console.log(`${checks.length - failed.length}/${checks.length} passed`);
     process.exit(failed.length ? 1 : 0);

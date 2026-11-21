@@ -10,6 +10,7 @@ import { ACCOUNTING_POSTING_RULESET } from './services/accountingPeriodService';
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 const ENV_PATH = path.resolve(__dirname, '..', ENV_FILE);
 dotenv.config({ path: ENV_PATH });
+dotenv.config({ path: path.resolve(__dirname, '..', '.env.local') });
 
 const runtimeFeatures = getRuntimeFeatures();
 

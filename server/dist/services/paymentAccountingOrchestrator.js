@@ -36,6 +36,7 @@ const trustPaymentPostingService_1 = __importDefault(require("./trustPaymentPost
 const operationalFailure_1 = require("./operationalFailure");
 const operationalSignal_1 = require("./operationalSignal");
 const financialOperationVisibility_1 = require("./financialOperationVisibility");
+const vatPolicyService_1 = require("./vatPolicyService");
 function persistOwnerIncomeFailure(payment_1, message_1) {
     return __awaiter(this, arguments, void 0, function* (payment, message, haystack = '') {
         const paymentId = String(payment._id || '');
@@ -152,8 +153,10 @@ function asState(value) {
  */
 function postPaymentAccounting(paymentId, opts) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
         const errors = [];
         const artifacts = {};
+        let vatObligationSkipped;
         const payment = yield Payment_1.Payment.findById(paymentId);
         if (!payment) {
             return { paymentId, status: 'failed', reason: 'missing_payment', artifacts, errors: ['Payment not found'] };
@@ -177,6 +180,29 @@ function postPaymentAccounting(paymentId, opts) {
                 errors: []
             };
         }
+        const snapshotVat = Number((_d = (_b = (_a = payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.vatOnCommission) !== null && _b !== void 0 ? _b : (_c = payment.commissionDetails) === null || _c === void 0 ? void 0 : _c.vatAmount) !== null && _d !== void 0 ? _d : 0);
+        if (snapshotVat > 0.005) {
+            const journalVat = yield (0, vatPolicyService_1.assessVatPayableJournal)({
+                payment,
+                approveHistoricalVatObligation: (opts === null || opts === void 0 ? void 0 : opts.approveHistoricalVatObligation) === true
+            });
+            if (!journalVat.recognise) {
+                return {
+                    paymentId,
+                    status: 'skipped',
+                    reason: vatPolicyService_1.HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED,
+                    artifacts: {
+                        ownerIncome: 'skipped',
+                        agentCommission: 'skipped',
+                        companyCommission: 'skipped',
+                        journal: 'skipped',
+                        vatObligation: 'skipped'
+                    },
+                    errors: [],
+                    vatObligationSkipped: journalVat.reason
+                };
+            }
+        }
         if (!policy.skipOwnerIncome) {
             try {
                 (0, testFailureSeam_1.throwOnceIfArmed)(paymentId, String(payment.notes || ''), 'PHASE_FAIL_OWNER_INCOME');
@@ -184,20 +210,25 @@ function postPaymentAccounting(paymentId, opts) {
                 artifacts.ownerIncome = 'posted';
             }
             catch (e) {
-                artifacts.ownerIncome = 'failed';
-                errors.push(`ownerIncome: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
-                if (e instanceof transactionDomain_1.OwnerIncomeAmountMissingError || (e === null || e === void 0 ? void 0 : e.code) === 'OWNER_INCOME_AMOUNT_MISSING') {
-                    const durable = yield persistOwnerIncomeFailure(payment, (e === null || e === void 0 ? void 0 : e.message) || String(e), String(payment.notes || ''));
-                    if (!durable) {
-                        errors.push('ownerIncome.exception: the owner-income failure was not durably recorded');
-                    }
+                if (e instanceof transactionDomain_1.OwnerIncomeNotApplicableError || (e === null || e === void 0 ? void 0 : e.code) === 'OWNER_INCOME_NOT_APPLICABLE') {
+                    artifacts.ownerIncome = 'skipped';
                 }
-                if (!(0, transactionDomain_1.isPermanentAccountingFailure)(e)) {
-                    try {
-                        yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(paymentId);
+                else {
+                    artifacts.ownerIncome = 'failed';
+                    errors.push(`ownerIncome: ${(e === null || e === void 0 ? void 0 : e.message) || e}`);
+                    if (e instanceof transactionDomain_1.OwnerIncomeAmountMissingError || (e === null || e === void 0 ? void 0 : e.code) === 'OWNER_INCOME_AMOUNT_MISSING') {
+                        const durable = yield persistOwnerIncomeFailure(payment, (e === null || e === void 0 ? void 0 : e.message) || String(e), String(payment.notes || ''));
+                        if (!durable) {
+                            errors.push('ownerIncome.exception: the owner-income failure was not durably recorded');
+                        }
                     }
-                    catch (enqueueErr) {
-                        errors.push(`ownerIncome.enqueue: ${(enqueueErr === null || enqueueErr === void 0 ? void 0 : enqueueErr.message) || enqueueErr}`);
+                    if (!(0, transactionDomain_1.isPermanentAccountingFailure)(e)) {
+                        try {
+                            yield ledgerEventService_1.default.enqueueOwnerIncomeEvent(paymentId);
+                        }
+                        catch (enqueueErr) {
+                            errors.push(`ownerIncome.enqueue: ${(enqueueErr === null || enqueueErr === void 0 ? void 0 : enqueueErr.message) || enqueueErr}`);
+                        }
                     }
                 }
             }
@@ -256,7 +287,14 @@ function postPaymentAccounting(paymentId, opts) {
                     journalSeams.add(journalSeamKey);
                     throw new Error('PHASE26_FAIL_JOURNAL');
                 }
-                const journalResult = yield accountingIntegrationService_1.default.syncPaymentReceived(payment, { createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy });
+                const journalResult = yield accountingIntegrationService_1.default.syncPaymentReceived(payment, {
+                    createdBy: opts === null || opts === void 0 ? void 0 : opts.createdBy,
+                    approveHistoricalVatObligation: (opts === null || opts === void 0 ? void 0 : opts.approveHistoricalVatObligation) === true
+                });
+                if (journalResult.vatObligationSkipped) {
+                    artifacts.vatObligation = 'skipped';
+                    vatObligationSkipped = journalResult.vatObligationSkipped;
+                }
                 if (journalResult.receiptJournal === 'posted') {
                     artifacts.journal = 'posted';
                 }
@@ -296,7 +334,14 @@ function postPaymentAccounting(paymentId, opts) {
         if ((company === null || company === void 0 ? void 0 : company.workspaceType) === 'individual' || (company === null || company === void 0 ? void 0 : company.plan) === 'INDIVIDUAL') {
             yield individualTaxMetadataService_1.default.safeAttachForPayment(paymentId);
         }
-        return { paymentId, status, artifacts, errors, reason: policy.reason };
+        return {
+            paymentId,
+            status,
+            artifacts,
+            errors,
+            reason: policy.reason,
+            vatObligationSkipped
+        };
     });
 }
 /**

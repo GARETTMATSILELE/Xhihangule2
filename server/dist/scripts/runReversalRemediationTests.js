@@ -204,7 +204,7 @@ function main() {
             country: 'Zimbabwe',
             ownerId: user._id,
             workspaceType: 'agency',
-            taxProfile: { vatRegistered: true, vatNumber: 'ZW-REM', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
+            taxProfile: { vatRegistered: true, vatNumber: 'ZW-REM', vatCategory: 'standard', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
         });
         for (const date of [PAYMENT_DATE, new Date()]) {
             const bounds = (0, accountingPeriodService_1.utcMonthBounds)(date);

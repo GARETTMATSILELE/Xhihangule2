@@ -223,9 +223,19 @@ function loadAccountingActualSnapshot(payment) {
                 deposit: linkedId(depositDoc === null || depositDoc === void 0 ? void 0 : depositDoc.paymentId)
             },
             duplicates: {
-                ownerIncome: incomeTxs.length || undefined,
-                companyCommission: companyTxs.length || undefined,
-                deposit: deposits.length || undefined
+                ownerIncome: incomeTxs.length > 1 ? incomeTxs.length : undefined,
+                agentCommission: agentTxs.length > 1 ? agentTxs.length : undefined,
+                companyCommission: companyTxs.length > 1 ? companyTxs.length : undefined,
+                journal: journalCandidates.filter((journal) => String((journal === null || journal === void 0 ? void 0 : journal.status) || 'posted') === 'posted'
+                    && String((journal === null || journal === void 0 ? void 0 : journal.sourceId) || '') === paymentId
+                    && String((journal === null || journal === void 0 ? void 0 : journal.sourceModule) || '') === String(receiptModule || '')
+                    && (!companyObjectId || String((journal === null || journal === void 0 ? void 0 : journal.companyId) || '') === String(companyObjectId))).length > 1
+                    ? journalCandidates.filter((journal) => String((journal === null || journal === void 0 ? void 0 : journal.status) || 'posted') === 'posted'
+                        && String((journal === null || journal === void 0 ? void 0 : journal.sourceId) || '') === paymentId
+                        && String((journal === null || journal === void 0 ? void 0 : journal.sourceModule) || '') === String(receiptModule || '')
+                        && (!companyObjectId || String((journal === null || journal === void 0 ? void 0 : journal.companyId) || '') === String(companyObjectId))).length
+                    : undefined,
+                deposit: deposits.length > 1 ? deposits.length : undefined
             },
             journalReferenceCollision: journalClass.referenceCollision || undefined,
             journalOtherCompanyReference: journalClass.otherCompanyReference || undefined
@@ -385,6 +395,7 @@ function resolveIncompleteAccountingException(paymentId, opts) {
 }
 function applyReconciliationOutcome(paymentId, recon, extra) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         let effective = recon;
         let lastError = extra === null || extra === void 0 ? void 0 : extra.lastError;
         if (recon.accountingComplete) {
@@ -397,6 +408,22 @@ function applyReconciliationOutcome(paymentId, recon, extra) {
             if (obligationGap) {
                 effective = Object.assign(Object.assign({}, recon), { status: 'incomplete', accountingComplete: false, missing: Array.from(new Set([...(recon.missing || []), 'vat'])) });
                 lastError = obligationGap;
+            }
+            const priorMissing = Array.isArray(payment === null || payment === void 0 ? void 0 : payment.accountingMissing)
+                ? payment.accountingMissing.map((item) => String(item))
+                : [];
+            const storedOwner = Number(((_a = payment === null || payment === void 0 ? void 0 : payment.commissionDetails) === null || _a === void 0 ? void 0 : _a.ownerAmount) || 0);
+            if (payment && effective.accountingComplete && payment.accountingComplete === false && storedOwner <= 0) {
+                const openOwnerException = priorMissing.includes('ownerIncome') || Boolean(yield AccountingException_1.AccountingException.exists({
+                    paymentId: payment._id,
+                    status: 'open',
+                    kind: 'incomplete_projection',
+                    component: 'ownerIncome'
+                }));
+                if (openOwnerException) {
+                    effective = Object.assign(Object.assign({}, effective), { status: 'incomplete', accountingComplete: false, missing: Array.from(new Set([...(effective.missing || []), 'ownerIncome'])) });
+                    lastError = lastError || 'Stored incomplete accounting flag retained. A zero owner-income classification does not clear a historical exception.';
+                }
             }
         }
         const persisted = yield persistAccountingIntegrityFromRecon(paymentId, effective, Object.assign(Object.assign({}, extra), { lastError }));
@@ -627,7 +654,10 @@ function repairPaymentAccounting(paymentId, opts) {
         let postResult = { errors: [] };
         let depositResult = 'skipped';
         if (plan.wouldCreate.length > 0) {
-            postResult = yield (0, paymentAccountingOrchestrator_1.postPaymentAccounting)(paymentId, { createdBy: (opts === null || opts === void 0 ? void 0 : opts.createdBy) || (opts === null || opts === void 0 ? void 0 : opts.userId) });
+            postResult = yield (0, paymentAccountingOrchestrator_1.postPaymentAccounting)(paymentId, {
+                createdBy: (opts === null || opts === void 0 ? void 0 : opts.createdBy) || (opts === null || opts === void 0 ? void 0 : opts.userId),
+                approveHistoricalVatObligation: (opts === null || opts === void 0 ? void 0 : opts.approveHistoricalVatObligation) === true
+            });
             const paymentDoc = yield Payment_1.Payment.findById(paymentId);
             if (paymentDoc && plan.wouldCreate.includes('deposit')) {
                 try {
@@ -686,7 +716,11 @@ function repairPaymentAccounting(paymentId, opts) {
             componentsCreated: created,
             componentsSkipped: plan.wouldNotModify,
             requiresManualReview: finalPlan.requiresManualReview,
-            recoveryAssessment
+            recoveryAssessment,
+            vatObligationSkipped: postResult.vatObligationSkipped,
+            historicalVatReview: postResult.reason === 'HISTORICAL_VAT_JOURNAL_REVIEW_REQUIRED'
+                ? (postResult.vatObligationSkipped || postResult.reason)
+                : undefined
         };
     });
 }

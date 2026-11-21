@@ -2,15 +2,58 @@ import React, { useEffect, useState } from 'react';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { Alert, Box, Button, CircularProgress, Container, Paper, Typography } from '@mui/material';
 import api from '../../api/axios';
+import { apiService } from '../../api';
 import PaynowBadge from '../../components/payments/PaynowBadge';
 
 const BillingReturn: React.FC = () => {
   const location = useLocation();
-  const reference = new URLSearchParams(location.search).get('reference') || '';
-  const [paymentStatus, setPaymentStatus] = useState<'checking' | 'paid' | 'pending' | 'failed'>('checking');
-  const [message, setMessage] = useState('Confirming your Paynow payment.');
+  const params = new URLSearchParams(location.search);
+  const reference = params.get('reference') || '';
+  const provider = params.get('provider') || '';
+  const paymentSessionId = params.get('paymentSessionId') || '';
+  const browserCancelled = params.get('checkout') === 'cancelled';
+  const dodoReturn = provider === 'dodo' || Boolean(paymentSessionId);
+  const [paymentStatus, setPaymentStatus] = useState<'checking' | 'paid' | 'pending' | 'failed'>(browserCancelled ? 'failed' : 'checking');
+  const [message, setMessage] = useState(browserCancelled
+    ? 'Checkout was cancelled in the browser. The subscription stays inactive until a verified payment arrives.'
+    : dodoReturn ? 'Waiting for Dodo Payments to confirm this payment.' : 'Confirming your Paynow payment.');
 
   useEffect(() => {
+    if (dodoReturn) {
+      if (!paymentSessionId) return undefined;
+      let stopped = false;
+      let attempts = 0;
+      const check = async () => {
+        attempts += 1;
+        try {
+          await apiService.reconcileDodoCheckout(paymentSessionId, params.get('payment_id') || undefined);
+          const session = await apiService.getCheckoutSession(paymentSessionId);
+          if (stopped) return;
+          const state = String(session.data?.status || '');
+          if (state === 'reconciled' || state === 'paid') {
+            setPaymentStatus('paid');
+            setMessage('Payment received. Your Mantis subscription is active.');
+            return;
+          }
+          if (state === 'failed' || state === 'cancelled' || state === 'expired') {
+            setPaymentStatus('failed');
+            setMessage('No successful payment has been confirmed. You can choose a payment method again.');
+            return;
+          }
+        } catch {
+          if (stopped) return;
+        }
+        if (attempts >= 8) {
+          setPaymentStatus('pending');
+          setMessage('The payment is still pending. Returning to this page does not start another payment.');
+          return;
+        }
+        window.setTimeout(check, 2500);
+      };
+      if (!browserCancelled) check();
+      return () => { stopped = true; };
+    }
+
     if (!reference) {
       setPaymentStatus('pending');
       setMessage('You have returned from Paynow. If you completed payment, your subscription will activate shortly.');
@@ -66,12 +109,12 @@ const BillingReturn: React.FC = () => {
     return () => {
       stopped = true;
     };
-  }, [reference]);
+  }, [reference, dodoReturn, paymentSessionId, browserCancelled]);
 
   return (
     <Container maxWidth="sm" sx={{ py: 6 }}>
       <Paper elevation={3} sx={{ p: 4, borderRadius: 3 }}>
-        <Typography variant="h5" gutterBottom>Paynow payment</Typography>
+        <Typography variant="h5" gutterBottom>{dodoReturn ? 'Card payment' : 'Paynow payment'}</Typography>
         {paymentStatus === 'checking' && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
             <CircularProgress size={22} />
@@ -88,10 +131,10 @@ const BillingReturn: React.FC = () => {
             <Button component={RouterLink} to="/workspace-setup" variant="contained">Continue setup</Button>
           )}
           {paymentStatus !== 'paid' && (
-            <Button component={RouterLink} to="/checkout/paypal" variant="outlined">{paymentStatus === 'failed' ? 'Retry checkout' : 'Return to checkout'}</Button>
+            <Button component={RouterLink} to="/billing/setup" variant="outlined">{paymentStatus === 'failed' ? 'Choose a payment method' : 'Return to checkout'}</Button>
           )}
         </Box>
-        <PaynowBadge />
+        {!dodoReturn && <PaynowBadge />}
       </Paper>
     </Container>
   );

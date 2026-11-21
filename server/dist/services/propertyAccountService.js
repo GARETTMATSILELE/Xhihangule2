@@ -1485,6 +1485,10 @@ class PropertyAccountService {
                     passThroughTotal
                 });
                 if (Number(payment.amount || 0) > 0 && ownerIncomeAmount <= 0) {
+                    const { legitimateZeroOwnerIncome } = yield Promise.resolve().then(() => __importStar(require('./accountingIntegrityClassification')));
+                    if (legitimateZeroOwnerIncome(payment)) {
+                        throw new transactionDomain_1.OwnerIncomeNotApplicableError(paymentId);
+                    }
                     throw new transactionDomain_1.OwnerIncomeAmountMissingError(paymentId);
                 }
                 const ownerSeamKey = String(paymentId);

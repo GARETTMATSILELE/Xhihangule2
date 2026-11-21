@@ -8,7 +8,7 @@
  * It uses the RENTAL domain and cannot be posted against a sale property.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SaleContextRequiredError = exports.OwnerIncomeAmountMissingError = exports.PaymentDomainMissingError = exports.AccountingClassificationConflictError = void 0;
+exports.SaleContextRequiredError = exports.OwnerIncomeNotApplicableError = exports.OwnerIncomeAmountMissingError = exports.PaymentDomainMissingError = exports.AccountingClassificationConflictError = void 0;
 exports.domainFromPaymentType = domainFromPaymentType;
 exports.domainFromRentalType = domainFromRentalType;
 exports.ledgerForDomain = ledgerForDomain;
@@ -57,6 +57,15 @@ class OwnerIncomeAmountMissingError extends Error {
     }
 }
 exports.OwnerIncomeAmountMissingError = OwnerIncomeAmountMissingError;
+class OwnerIncomeNotApplicableError extends Error {
+    constructor(paymentId) {
+        super(`Owner income is not applicable for payment ${paymentId} because the stored commission snapshot calculates zero.`);
+        this.code = 'OWNER_INCOME_NOT_APPLICABLE';
+        this.statusCode = 200;
+        this.name = 'OwnerIncomeNotApplicableError';
+    }
+}
+exports.OwnerIncomeNotApplicableError = OwnerIncomeNotApplicableError;
 class SaleContextRequiredError extends Error {
     constructor() {
         super('A sale payment requires a property, development, or unit.');

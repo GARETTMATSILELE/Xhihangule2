@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changePlan = exports.redeemVoucher = exports.getPaymentStatus = exports.createCheckout = exports.getCheckoutSession = exports.listPublicPlans = void 0;
+exports.changePlan = exports.redeemVoucher = exports.getPaymentStatus = exports.reconcileDodoCheckout = exports.createCheckout = exports.getCheckoutSession = exports.listPaymentProviders = exports.listPublicPlans = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const plan_1 = require("../types/plan");
 const BillingPayment_1 = require("../models/BillingPayment");
@@ -23,7 +23,11 @@ const Company_1 = require("../models/Company");
 const billingActivationService_1 = require("../services/billingActivationService");
 const registrationPaymentPolicy_1 = require("../services/registrationPaymentPolicy");
 const systemPlanService_1 = require("../services/systemPlanService");
-const paynowController_1 = require("./paynowController");
+const paynowSubscriptionProvider_1 = require("../services/subscriptionPayments/paynowSubscriptionProvider");
+const providerAvailability_1 = require("../services/subscriptionPayments/providerAvailability");
+const subscriptionCheckoutService_1 = require("../services/subscriptionPayments/subscriptionCheckoutService");
+const dodoWebhookService_1 = require("../services/subscriptionPayments/dodoWebhookService");
+const dodoProductMap_1 = require("../services/subscriptionPayments/dodoProductMap");
 const crypto_1 = __importDefault(require("crypto"));
 const listPublicPlans = (_req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -37,6 +41,10 @@ const listPublicPlans = (_req, res, next) => __awaiter(void 0, void 0, void 0, f
     }
 });
 exports.listPublicPlans = listPublicPlans;
+const listPaymentProviders = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    res.json({ providers: (0, providerAvailability_1.readProviderAvailability)() });
+});
+exports.listPaymentProviders = listPaymentProviders;
 const getCheckoutSession = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
@@ -44,14 +52,14 @@ const getCheckoutSession = (req, res) => __awaiter(void 0, void 0, void 0, funct
     const requestedId = String(req.params.id || 'current');
     const query = {
         companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-        provider: 'paynow'
+        provider: { $in: ['paynow', 'dodo'] }
     };
     if (requestedId !== 'current')
         query._id = requestedId;
     const session = yield PaymentSession_1.PaymentSession.findOne(query).sort({ createdAt: -1 });
     if (!session)
         return res.status(404).json({ message: 'No checkout is waiting for this company', code: 'NO_CHECKOUT' });
-    const priced = yield (0, systemPlanService_1.chargeForPlan)(session.plan, session.billingCycle);
+    const priced = yield (0, dodoProductMap_1.subscriptionListPrice)(session.plan, session.billingCycle);
     if (priced == null) {
         return res.status(503).json({ message: 'This plan does not have a configured price for the selected billing frequency', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
     }
@@ -62,27 +70,49 @@ const getCheckoutSession = (req, res) => __awaiter(void 0, void 0, void 0, funct
         amount: priced,
         currency: session.currency || 'USD',
         status: session.status,
-        awaitingConfirmation: Boolean(session.pollUrl) && (session.status === 'pending' || session.status === 'provider_created')
+        provider: session.provider,
+        awaitingConfirmation: (0, providerAvailability_1.hostedCheckoutStarted)(session)
     });
 });
 exports.getCheckoutSession = getCheckoutSession;
 const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const { plan, cycle } = req.body || {};
     if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
         return res.status(401).json({ message: 'Unauthorized' });
     if (!plan || !['INDIVIDUAL', 'SME', 'ENTERPRISE'].includes(plan))
         return res.status(400).json({ message: 'Invalid plan' });
-    if (!cycle || !['monthly', 'yearly'].includes(cycle))
+    if (!cycle || !['monthly', 'quarterly', 'yearly'].includes(cycle))
         return res.status(400).json({ message: 'Invalid cycle' });
     if (plan === 'ENTERPRISE' && !(0, registrationPaymentPolicy_1.enterpriseDirectCheckoutEnabled)()) {
         return res.status(400).json({ message: 'Enterprise is arranged with sales. Direct checkout is not available.', code: 'ENTERPRISE_SALES_ONLY' });
     }
+    const selection = (0, providerAvailability_1.selectSubscriptionProvider)((_b = req.body) === null || _b === void 0 ? void 0 : _b.provider);
+    if (!selection.ok)
+        return res.status(selection.status).json({ message: selection.message, code: selection.code });
+    if (selection.provider === 'paynow' && cycle === 'quarterly') {
+        return res.status(400).json({ message: 'Paynow subscription checkout does not bill quarterly.', code: 'CYCLE_NOT_SUPPORTED' });
+    }
     const pendingRegistration = yield PaymentSession_1.PaymentSession.findOne({
         companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-        provider: 'paynow',
+        provider: { $in: ['paynow', 'dodo'] },
         status: { $in: ['pending', 'provider_created'] }
     }).sort({ createdAt: -1 });
+    if (pendingRegistration && pendingRegistration.provider !== selection.provider) {
+        if ((0, providerAvailability_1.hostedCheckoutStarted)(pendingRegistration)) {
+            return res.status(409).json({
+                message: 'A payment attempt is already open. Finish or cancel it before choosing another provider.',
+                code: 'PAYMENT_ATTEMPT_PENDING',
+                provider: pendingRegistration.provider,
+                paymentSessionId: pendingRegistration._id
+            });
+        }
+        pendingRegistration.provider = selection.provider;
+        yield pendingRegistration.save();
+        if (pendingRegistration.billingPaymentId) {
+            yield BillingPayment_1.BillingPayment.updateOne({ _id: pendingRegistration.billingPaymentId }, { $set: { provider: selection.provider } });
+        }
+    }
     if (pendingRegistration && (pendingRegistration.plan !== plan || pendingRegistration.billingCycle !== cycle)) {
         return res.status(409).json({
             message: 'Checkout does not match the plan and billing frequency selected at registration',
@@ -92,7 +122,11 @@ const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function*
             paymentSessionId: pendingRegistration._id
         });
     }
-    const amount = (yield (0, systemPlanService_1.chargeForPlan)(plan, cycle)) || 0;
+    if (selection.provider === 'dodo') {
+        const started = yield (0, subscriptionCheckoutService_1.startDodoSubscriptionCheckout)(req, { plan, cycle, openSession: pendingRegistration });
+        return res.status(started.status).json(started.body);
+    }
+    const amount = (yield (0, systemPlanService_1.chargeForPlan)(plan, cycle === 'yearly' ? 'yearly' : 'monthly')) || 0;
     if (!Number.isFinite(amount) || amount <= 0) {
         return res.status(503).json({ message: 'This plan does not have a configured price', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
     }
@@ -112,17 +146,24 @@ const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function*
             }
         }
         try {
-            const checkout = yield (0, paynowController_1.initiatePaynowCheckout)(req, {
+            const checkout = yield (0, paynowSubscriptionProvider_1.createPaynowSubscriptionProvider)(req).createCheckout({
                 paymentSessionId: String(openSession._id),
+                companyId: String(req.user.companyId),
+                subscriptionId: String(openSession.subscriptionId || ''),
+                customerId: String(req.user.userId || ''),
+                customerEmail: '',
+                customerName: '',
                 plan,
                 cycle,
+                amount,
+                currency: 'USD',
                 description: `Mantis ${plan} ${cycle} subscription`
             });
             return res.json({
                 redirectUrl: checkout.redirectUrl,
                 paymentId: openSession.billingPaymentId,
                 paymentSessionId: openSession._id,
-                reference: checkout.reference,
+                reference: checkout.providerTransactionId,
                 metadata: { companyId: req.user.companyId, userId: req.user.userId, plan, billingCycle: cycle }
             });
         }
@@ -140,7 +181,7 @@ const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function*
     const paymentSession = yield PaymentSession_1.PaymentSession.findOneAndUpdate({ idempotencyKey }, {
         $setOnInsert: {
             companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-            userId: ((_b = req.user) === null || _b === void 0 ? void 0 : _b.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
+            userId: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
             subscriptionId: subscription._id,
             idempotencyKey,
             provider: 'paynow',
@@ -155,7 +196,7 @@ const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }, { upsert: true, new: true });
     const payment = yield BillingPayment_1.BillingPayment.create({
         companyId: new mongoose_1.default.Types.ObjectId(req.user.companyId),
-        userId: ((_c = req.user) === null || _c === void 0 ? void 0 : _c.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
+        userId: ((_d = req.user) === null || _d === void 0 ? void 0 : _d.userId) ? new mongoose_1.default.Types.ObjectId(req.user.userId) : undefined,
         subscriptionId: subscription._id,
         paymentSessionId: paymentSession._id,
         plan,
@@ -172,11 +213,17 @@ const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function*
     yield paymentSession.save();
     let checkout;
     try {
-        checkout = yield (0, paynowController_1.initiatePaynowCheckout)(req, {
+        checkout = yield (0, paynowSubscriptionProvider_1.createPaynowSubscriptionProvider)(req).createCheckout({
             paymentSessionId: String(paymentSession._id),
+            companyId: String(req.user.companyId),
+            subscriptionId: String(subscription._id),
+            customerId: String(req.user.userId || ''),
+            customerEmail: '',
+            customerName: '',
             plan,
             cycle,
-            reference: ref,
+            amount,
+            currency: 'USD',
             description: `Mantis ${plan} ${cycle} subscription`
         });
     }
@@ -203,6 +250,17 @@ const createCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function*
     });
 });
 exports.createCheckout = createCheckout;
+const reconcileDodoCheckout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.companyId))
+        return res.status(401).json({ message: 'Unauthorized' });
+    const paymentSessionId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.paymentSessionId) || '');
+    if (!paymentSessionId)
+        return res.status(400).json({ message: 'paymentSessionId is required', code: 'PAYMENT_SESSION_REQUIRED' });
+    const result = yield (0, dodoWebhookService_1.reconcileDodoPayment)(paymentSessionId, req.user.companyId, String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.paymentId) || ''));
+    return res.status(result.status).json(result.body);
+});
+exports.reconcileDodoCheckout = reconcileDodoCheckout;
 const getPaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const payment = yield BillingPayment_1.BillingPayment.findById(req.params.id);
     if (!payment)

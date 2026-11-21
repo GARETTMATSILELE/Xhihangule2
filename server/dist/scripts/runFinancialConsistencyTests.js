@@ -90,7 +90,7 @@ function main() {
             tinNumber: 'CONS-TIN',
             country: 'Zimbabwe',
             ownerId: user._id,
-            taxProfile: { vatRegistered: true, vatNumber: 'ZW-CONS', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
+            taxProfile: { vatRegistered: true, vatNumber: 'ZW-CONS', vatCategory: 'standard', vatRegistrationEffectiveDate: new Date('2020-01-01T00:00:00.000Z') }
         });
         const otherCompany = yield Company_1.Company.create({
             name: 'Other Consistency Co',

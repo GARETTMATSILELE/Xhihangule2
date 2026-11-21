@@ -10,6 +10,8 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import propertyRoutes from './routes/propertyRoutes';
 import billingRoutes from './routes/billingRoutes';
+import { handleDodoWebhook } from './controllers/dodoWebhookController';
+import { describeDodoStartup } from './services/subscriptionPayments/providerAvailability';
 import tenantRoutes from './routes/tenantRoutes';
 import leaseRoutes from './routes/leaseRoutes';
 import paymentRoutes from './routes/paymentRoutes';
@@ -81,6 +83,7 @@ const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' 
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
 const ENV_PATH = path.resolve(__dirname, '..', ENV_FILE);
 dotenv.config({ path: ENV_PATH });
+dotenv.config({ path: path.resolve(__dirname, '..', '.env.local') });
 
 const app = express();
 const runtimeFeatures = getRuntimeFeatures();
@@ -294,6 +297,7 @@ app.use(cors({
 app.use(cookieParser());
 
 const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '10mb';
+app.post('/api/billing/dodo/webhook', express.raw({ type: 'application/json', limit: '1mb' }), handleDodoWebhook);
 app.use(express.json({ limit: requestBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
@@ -543,6 +547,7 @@ const { io } = initializeSocket(httpServer);
 if (runtimeFeatures.runHttpServer) {
   httpServer.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(describeDodoStartup());
     console.log('Accounting API boot', {
       phase: '9',
       startedAt: new Date().toISOString(),

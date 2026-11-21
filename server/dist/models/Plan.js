@@ -41,6 +41,7 @@ const PlanSchema = new mongoose_1.Schema({
     description: { type: String, trim: true },
     monthlyPrice: { type: Number, required: true, min: 0, default: 0 },
     annualPrice: { type: Number, required: true, min: 0, default: 0 },
+    quarterlyPrice: { type: Number, required: false, min: 0 },
     currency: { type: String, enum: ['USD', 'ZiG', 'ZWL'], default: 'USD' },
     limits: {
         maxUsers: { type: Number, default: null },

@@ -8,6 +8,7 @@ export interface IPlan extends Document {
   description?: string;
   monthlyPrice: number;
   annualPrice: number;
+  quarterlyPrice?: number;
   currency: 'USD' | 'ZiG' | 'ZWL';
   limits: {
     maxUsers?: number | null;
@@ -41,6 +42,7 @@ const PlanSchema = new Schema<IPlan>(
     description: { type: String, trim: true },
     monthlyPrice: { type: Number, required: true, min: 0, default: 0 },
     annualPrice: { type: Number, required: true, min: 0, default: 0 },
+    quarterlyPrice: { type: Number, required: false, min: 0 },
     currency: { type: String, enum: ['USD', 'ZiG', 'ZWL'], default: 'USD' },
     limits: {
       maxUsers: { type: Number, default: null },

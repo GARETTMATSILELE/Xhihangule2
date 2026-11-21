@@ -83,6 +83,7 @@ function buildRentalCorrectionCommission(source) {
                 leaseId: source.leaseId,
                 rentAllocated: amount,
                 levyAllocated: levy,
+                commissionPercentage: property === null || property === void 0 ? void 0 : property.commission,
                 vatOnCommission: flags.vatOnCommission,
                 vatTreatment: flags.vatTreatment,
                 vatRate: flags.vatRate,

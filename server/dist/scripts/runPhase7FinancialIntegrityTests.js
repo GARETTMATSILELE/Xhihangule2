@@ -42,6 +42,7 @@ function introSnapshot(rentAllocated, alreadyConsumed, levyAllocated = 0, vat) {
         alreadyConsumed
     });
     const calculated = (0, introductionCommissionService_1.snapshotFromIntroductionAllocation)(allocation, {
+        commissionPercentage: 100,
         vatOnCommission: Boolean(vat === null || vat === void 0 ? void 0 : vat.vatOnCommission),
         vatTreatment: (vat === null || vat === void 0 ? void 0 : vat.vatOnCommission) ? 'inclusive' : undefined,
         vatRate: vat === null || vat === void 0 ? void 0 : vat.vatRate,

@@ -9,7 +9,7 @@ import { throwOnceIfArmed } from './testFailureSeam';
 
 type ActivationInput = {
   paymentSessionId?: string;
-  provider?: 'paynow' | 'cash' | 'manual';
+  provider?: 'paynow' | 'dodo' | 'cash' | 'manual';
   providerRef?: string;
   rawProviderResponse?: any;
   paidAt?: Date;
@@ -172,6 +172,7 @@ export async function activateSubscriptionFromPayment(input: ActivationInput) {
   const now = new Date();
   const periodEnd = new Date(now);
   if (paymentSession.billingCycle === 'yearly') periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+  else if (paymentSession.billingCycle === 'quarterly') periodEnd.setMonth(periodEnd.getMonth() + 3);
   else periodEnd.setMonth(periodEnd.getMonth() + 1);
 
   const subscriptionQuery: any = paymentSession.subscriptionId

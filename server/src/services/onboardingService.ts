@@ -11,6 +11,7 @@ import { PLAN_CONFIG, Plan, WorkspaceType } from '../types/plan';
 import { normalizeCompanyType, normalizeEmail, normalizeLegalIdentifier } from '../utils/normalization';
 import { isRegistrationEmail, registrationPasswordError, resolvePublicRegistration } from './registrationPaymentPolicy';
 import { chargeForPlan } from './systemPlanService';
+import { hostedCheckoutStarted, selectSubscriptionProvider, SubscriptionProviderId } from './subscriptionPayments/providerAvailability';
 import { releaseAbandonedRegistration, SIGN_IN_REQUIRED_MESSAGE } from './abandonedRegistrationService';
 import { activateSubscriptionFromPayment } from './billingActivationService';
 import { recordAuditEvent } from './auditService';
@@ -22,6 +23,7 @@ export type StartOnboardingInput = {
   plan: Plan;
   billingCycle?: 'monthly' | 'yearly';
   registrationMode?: 'trial' | 'paid';
+  provider?: SubscriptionProviderId;
   company: {
     name: string;
     email?: string;
@@ -59,6 +61,21 @@ type CreatedIds = {
   billingPaymentId?: mongoose.Types.ObjectId;
   onboardingSessionId?: mongoose.Types.ObjectId;
 };
+
+async function assignUnsentProvider(paymentSessionId: mongoose.Types.ObjectId, provider: SubscriptionProviderId) {
+  const session = await PaymentSession.findById(paymentSessionId);
+  if (!session || session.provider === provider || session.status !== 'pending' || hostedCheckoutStarted(session)) {
+    if (session && session.provider !== provider && hostedCheckoutStarted(session)) {
+      throw new AppError('A payment attempt is already open. Finish or cancel it before choosing another provider.', 409, 'PAYMENT_ATTEMPT_PENDING');
+    }
+    return;
+  }
+  session.provider = provider;
+  await session.save();
+  if (session.billingPaymentId) {
+    await BillingPayment.updateOne({ _id: session.billingPaymentId }, { $set: { provider } });
+  }
+}
 
 async function compensate(ids: CreatedIds) {
   if (ids.billingPaymentId) {
@@ -144,10 +161,16 @@ export class OnboardingService {
     if (paymentHold && amount == null) {
       throw new AppError('This plan does not have a configured price for the selected billing frequency', 503, 'REGISTRATION_PRICE_NOT_CONFIGURED');
     }
+    let checkoutProvider: SubscriptionProviderId = 'paynow';
+    if (paymentHold) {
+      const selection = selectSubscriptionProvider(input.provider);
+      if (!selection.ok) throw new AppError(selection.message, selection.status, selection.code);
+      checkoutProvider = selection.provider;
+    }
 
     const duplicateUser = await User.findOne({ $or: [{ normalizedEmail: email }, { email }] });
     if (duplicateUser) {
-      const resumed = await this.recoverDuplicate(duplicateUser, input.password, { plan, billingCycle });
+      const resumed = await this.recoverDuplicate(duplicateUser, input.password, { plan, billingCycle }, paymentHold ? checkoutProvider : undefined);
       if (resumed) return resumed;
     }
 
@@ -160,6 +183,9 @@ export class OnboardingService {
         if (!sessionUser || sessionUser.isArchived || !sameEmail || !passwordOk) {
           throw new AppError(SIGN_IN_REQUIRED_MESSAGE, 400, 'REGISTRATION_SIGN_IN_REQUIRED');
         }
+      }
+      if (paymentHold && existingSession.paymentSessionId) {
+        await assignUnsentProvider(existingSession.paymentSessionId, checkoutProvider);
       }
       return this.hydrate(existingSession._id.toString(), true);
     }
@@ -269,7 +295,7 @@ export class OnboardingService {
           subscriptionId: subscription[0]._id,
           onboardingSessionId: onboardingSession[0]._id,
           idempotencyKey: `${idempotencyKey}:payment`,
-          provider: 'paynow',
+          provider: checkoutProvider,
           providerRef: `SUBS-${company[0]._id.toString()}`,
           plan,
           billingCycle,
@@ -292,7 +318,7 @@ export class OnboardingService {
           amount,
           currency: 'USD',
           method: 'card',
-          provider: 'paynow',
+          provider: checkoutProvider,
           providerRef: `SUBS-${company[0]._id.toString()}`,
           idempotencyKey: `${idempotencyKey}:billing`,
           status: 'pending'
@@ -376,7 +402,8 @@ export class OnboardingService {
   private async recoverDuplicate(
     user: InstanceType<typeof User>,
     password: string,
-    offer: { plan: Plan; billingCycle: 'monthly' | 'yearly' }
+    offer: { plan: Plan; billingCycle: 'monthly' | 'yearly' },
+    provider?: SubscriptionProviderId
   ) {
     if (user.role === 'system_admin' || (user.roles || []).includes('system_admin') || !user.companyId) {
       throw new AppError(SIGN_IN_REQUIRED_MESSAGE, 400, 'REGISTRATION_SIGN_IN_REQUIRED');
@@ -392,13 +419,14 @@ export class OnboardingService {
     if (!company) {
       throw new AppError(SIGN_IN_REQUIRED_MESSAGE, 400, 'REGISTRATION_SIGN_IN_REQUIRED');
     }
-    return this.buildResume(user, company, offer);
+    return this.buildResume(user, company, offer, provider);
   }
 
   private async buildResume(
     user: InstanceType<typeof User>,
     company: InstanceType<typeof Company>,
-    offer: { plan: Plan; billingCycle: 'monthly' | 'yearly' }
+    offer: { plan: Plan; billingCycle: 'monthly' | 'yearly' },
+    provider?: SubscriptionProviderId
   ) {
     const [subscription, sessions, onboardingSession] = await Promise.all([
       Subscription.findOne({ companyId: company._id }).sort({ createdAt: -1 }),
@@ -456,8 +484,18 @@ export class OnboardingService {
     }
 
     const openSession = sessions.find((session) => session.status === 'pending' || session.status === 'provider_created');
-    if (openSession && (openSession.status === 'provider_created' || openSession.pollUrl)) {
+    if (openSession && hostedCheckoutStarted(openSession)) {
+      if (provider && openSession.provider !== provider) {
+        throw new AppError('A payment attempt is already open. Finish or cancel it before choosing another provider.', 409, 'PAYMENT_ATTEMPT_PENDING');
+      }
       return pack('payment', 'PAYMENT_IN_PROGRESS', 'This payment is still being checked. Do not start another payment until it is confirmed.', openSession);
+    }
+    if (provider && openSession && openSession.status === 'pending' && openSession.provider !== provider) {
+      openSession.provider = provider;
+      await openSession.save();
+      if (openSession.billingPaymentId) {
+        await BillingPayment.updateOne({ _id: openSession.billingPaymentId }, { $set: { provider } });
+      }
     }
 
     let paymentSession = openSession || sessions.find((session) => ['failed', 'cancelled', 'expired'].includes(session.status)) || null;
@@ -478,7 +516,11 @@ export class OnboardingService {
       }
     }
     if (!paymentSession && subscription) {
-      const amount = await chargeForPlan(company.plan as Plan, subscription.cycle);
+      const cycle = subscription.cycle === 'yearly' ? 'yearly' : subscription.cycle === 'monthly' ? 'monthly' : null;
+      if (!cycle) {
+        throw new AppError('This billing frequency is not available for Paynow registration', 400, 'CYCLE_NOT_SUPPORTED');
+      }
+      const amount = await chargeForPlan(company.plan as Plan, cycle);
       if (amount == null) {
         throw new AppError('This plan does not have a configured price for the selected billing frequency', 503, 'REGISTRATION_PRICE_NOT_CONFIGURED');
       }
@@ -488,7 +530,7 @@ export class OnboardingService {
         subscriptionId: subscription._id,
         onboardingSessionId: onboardingSession?._id,
         idempotencyKey: `resume:${company._id.toString()}:${Date.now()}`,
-        provider: 'paynow',
+        provider: provider || 'paynow',
         providerRef: `SUBS-${company._id.toString()}`,
         plan: company.plan,
         billingCycle: subscription.cycle,

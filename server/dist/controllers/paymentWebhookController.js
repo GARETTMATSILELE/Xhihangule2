@@ -160,6 +160,7 @@ const resolveWebhookCreatedPaymentFinancials = (input) => __awaiter(void 0, void
             leaseId: input.leaseId,
             rentAllocated: amount,
             levyAllocated: 0,
+            commissionPercentage: property === null || property === void 0 ? void 0 : property.commission,
             vatOnCommission: commissionVat.vatOnCommission,
             vatTreatment: commissionVat.vatTreatment,
             vatRate: commissionVat.vatRate,

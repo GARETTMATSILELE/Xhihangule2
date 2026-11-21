@@ -36,6 +36,7 @@ const logger_1 = require("../utils/logger");
 const operationalFailure_1 = require("../services/operationalFailure");
 const paynowCallbackService_1 = require("../services/paynowCallbackService");
 const paynowHash_1 = require("../services/paynowHash");
+const providerAvailability_1 = require("../services/subscriptionPayments/providerAvailability");
 // The official package does not ship TypeScript types.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Paynow } = require('paynow');
@@ -130,7 +131,7 @@ function httpError(message, statusCode, code) {
 }
 function initiatePaynowCheckout(req, input) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
+        var _a, _b, _c, _d, _e;
         if (!input.paymentSessionId) {
             throw httpError('A payment session is required', 400, 'PAYMENT_SESSION_REQUIRED');
         }
@@ -142,12 +143,15 @@ function initiatePaynowCheckout(req, input) {
         if (callerCompanyId && String(session.companyId) !== String(callerCompanyId)) {
             throw httpError('Payment session not found', 404, 'PAYMENT_SESSION_NOT_FOUND');
         }
+        if (session.provider === 'dodo' && (0, providerAvailability_1.hostedCheckoutStarted)(session)) {
+            throw httpError('A payment attempt is already open. Finish or cancel it before choosing another provider.', 409, 'PAYMENT_ATTEMPT_PENDING');
+        }
         if (session.status === 'paid' || session.status === 'reconciled') {
             throw httpError('This payment has already been completed', 409, 'PAYMENT_ALREADY_COMPLETED');
         }
         const plan = session.plan;
         const cycle = session.billingCycle;
-        if (!plan || !cycle || !plan_1.PLAN_CONFIG[plan] || !['monthly', 'yearly'].includes(cycle)) {
+        if (!plan || (cycle !== 'monthly' && cycle !== 'yearly') || !plan_1.PLAN_CONFIG[plan]) {
             throw httpError('A valid plan and billing cycle are required', 400, 'VALIDATION_ERROR');
         }
         const priced = yield (0, systemPlanService_1.chargeForPlan)(plan, cycle);
@@ -186,6 +190,15 @@ function initiatePaynowCheckout(req, input) {
         const ref = session.providerRef && String(session.providerRef).trim()
             ? String(session.providerRef).trim()
             : `SUBS-${session._id.toString()}`;
+        const officialTestEmail = String(process.env.PAYNOW_OFFICIAL_TEST_EMAIL || '').trim().toLowerCase();
+        const officialPaynowTest = process.env.PAYNOW_OFFICIAL_TEST_CHECKOUT === '1'
+            && officialTestEmail.length > 0
+            && email.trim().toLowerCase() === officialTestEmail;
+        if (officialPaynowTest && ((_c = session.metadata) === null || _c === void 0 ? void 0 : _c.officialPaynowTest) !== true) {
+            session.metadata = Object.assign(Object.assign({}, (session.metadata || {})), { officialPaynowTest: true });
+            session.markModified('metadata');
+            yield session.save();
+        }
         const requestHost = (0, registrationPaymentPolicy_1.paynowRequestHost)(req.headers);
         paynowLog('info', 'paynow_checkout_started', {
             correlationId: ref,
@@ -194,7 +207,8 @@ function initiatePaynowCheckout(req, input) {
             amount: priced,
             currency: 'USD',
             mode: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode,
-            testTransaction: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode === 'test'
+            testTransaction: (0, registrationPaymentPolicy_1.paynowConfigurationState)().mode === 'test',
+            officialPaynowTest
         });
         let deployment;
         try {
@@ -283,7 +297,17 @@ function initiatePaynowCheckout(req, input) {
             paymentSessionId: String(session._id),
             amount: priced,
             currency: 'USD',
-            paynowReference: String(((_c = session.rawProviderResponse) === null || _c === void 0 ? void 0 : _c.paynowReference) || '') || undefined
+            resultUrl: initiation === null || initiation === void 0 ? void 0 : initiation.resulturl,
+            returnUrl: initiation === null || initiation === void 0 ? void 0 : initiation.returnurl,
+            integrationId: initiation === null || initiation === void 0 ? void 0 : initiation.id,
+            statusField: initiation === null || initiation === void 0 ? void 0 : initiation.status,
+            referenceSent: initiation === null || initiation === void 0 ? void 0 : initiation.reference,
+            amountSent: initiation === null || initiation === void 0 ? void 0 : initiation.amount,
+            authEmailSent: Boolean(initiation === null || initiation === void 0 ? void 0 : initiation.authemail),
+            fieldOrder: initiation ? Object.keys(initiation).filter((name) => name.toLowerCase() !== 'hash') : undefined,
+            hashPrefix: (initiation === null || initiation === void 0 ? void 0 : initiation.hash) ? String(initiation.hash).slice(0, 6) : undefined,
+            officialPaynowTest: ((_d = session.metadata) === null || _d === void 0 ? void 0 : _d.officialPaynowTest) === true,
+            paynowReference: String(((_e = session.rawProviderResponse) === null || _e === void 0 ? void 0 : _e.paynowReference) || '') || undefined
         });
         return {
             reference: ref,
@@ -419,7 +443,8 @@ function confirmSessionPayment(req, reference, verifiedPoll) {
             amount: (_f = polled.parsed) === null || _f === void 0 ? void 0 : _f.amount,
             currency: ((_g = polled.fields) === null || _g === void 0 ? void 0 : _g.currency) || ((_h = polled.fields) === null || _h === void 0 ? void 0 : _h.Currency),
             reference: (_j = polled.parsed) === null || _j === void 0 ? void 0 : _j.reference,
-            paynowReference: (_k = polled.parsed) === null || _k === void 0 ? void 0 : _k.paynowReference
+            paynowReference: (_k = polled.parsed) === null || _k === void 0 ? void 0 : _k.paynowReference,
+            origin: 'webhook'
         });
         if (applied.activated === true) {
             paynowLog('info', 'paynow_subscription_activated', { correlationId: reference, reference });
@@ -598,6 +623,9 @@ function handleResult(req, res) {
             paynowLog('info', 'paynow_result_received', {
                 correlationId: reference || 'paynow',
                 reference: reference || undefined,
+                method: req.method,
+                path: req.path,
+                contentType: req.headers['content-type'],
                 hasHash: Boolean(payload.hash || payload.Hash)
             });
             if (!(0, registrationPaymentPolicy_1.verifyPaynowPayload)(payload, env.INTEGRATION_KEY)) {

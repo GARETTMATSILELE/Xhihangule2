@@ -16,6 +16,7 @@ import { validateOnboardingForm, handleRegistrationError } from '../../utils/reg
 import { billingPlanFromOnboarding, readOnboardingState, workspaceTypeFromOnboarding, writeOnboardingState } from '../../utils/onboardingState';
 import { getDashboardPath } from '../../utils/registrationUtils';
 import { SignupAvailabilityNotice, useSignupAvailability } from '../../hooks/useSignupAvailability';
+import PaymentMethodChoice, { checkoutButtonLabel, PaymentProviderId, PaymentProviderOption } from '../../components/payments/PaymentMethodChoice';
 
 const useOnboardingV2 = true;
 
@@ -82,6 +83,11 @@ const Signup: React.FC = () => {
   });
   const [error, setError] = useState('');
   const [accountHelp, setAccountHelp] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [provider, setProvider] = useState<PaymentProviderId | ''>('');
+  const [providers, setProviders] = useState<PaymentProviderOption[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(false);
+  const [providersError, setProvidersError] = useState('');
   const availability = useSignupAvailability();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,10 +133,40 @@ const Signup: React.FC = () => {
     });
   }, [location.search]);
 
+  useEffect(() => {
+    if (registrationMode !== 'paid') return undefined;
+    let cancelled = false;
+    setProvidersLoading(true);
+    setProvidersError('');
+    apiService.getPaymentProviders()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const methods = (data.providers || []).filter((item: PaymentProviderOption) => {
+          if (!item.available) return false;
+          if (item.id === 'paynow') return item.cycles.includes(billingCycle);
+          return item.cycles.includes(billingCycle);
+        });
+        setProviders(methods);
+      })
+      .catch(() => {
+        if (!cancelled) setProvidersError('Payment methods could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setProvidersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [registrationMode, billingCycle]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setAccountHelp(false);
+    if (registrationMode === 'paid' && !provider) {
+      setError('Choose a payment method before continuing.');
+      return;
+    }
 
     const validationErrors = useOnboardingV2
       ? validateOnboardingForm(formData)
@@ -141,6 +177,7 @@ const Signup: React.FC = () => {
     }
 
     try {
+      setSubmitting(true);
       if (useOnboardingV2) {
         const idempotencyKey = getOnboardingIdempotencyKey(formData.email, registrationMode === 'trial' ? 'INDIVIDUAL' : formData.plan, registrationMode, billingCycle);
         const response = await apiService.startOnboarding({
@@ -150,6 +187,7 @@ const Signup: React.FC = () => {
           plan: registrationMode === 'trial' ? 'INDIVIDUAL' : formData.plan,
           billingCycle,
           registrationMode,
+          ...(registrationMode === 'paid' && provider ? { provider } : {}),
           company: {
             name: formData.companyName,
             email: formData.companyEmail || formData.email,
@@ -190,6 +228,8 @@ const Signup: React.FC = () => {
     } catch (err: any) {
       setAccountHelp(err?.response?.data?.code === 'REGISTRATION_SIGN_IN_REQUIRED');
       setError(handleRegistrationError(err));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -279,7 +319,15 @@ const Signup: React.FC = () => {
                   label="Billing"
                   value={billingCycle === 'yearly' ? 'Yearly' : 'Monthly'}
                   disabled
-                  helperText="Secure checkout via Paynow. The amount is confirmed by Mantis."
+                  helperText="The amount is confirmed by Mantis. Choose a payment method before checkout."
+                />
+                <PaymentMethodChoice
+                  providers={providers}
+                  value={provider}
+                  onChange={setProvider}
+                  disabled={submitting}
+                  loading={providersLoading}
+                  error={providersError}
                 />
               </>
             )}
@@ -427,9 +475,10 @@ const Signup: React.FC = () => {
               type="submit"
               fullWidth
               variant="contained"
+              disabled={submitting || (registrationMode === 'paid' && (!provider || providersLoading || Boolean(providersError)))}
               sx={{ mt: 3, mb: 2 }}
             >
-              {registrationMode === 'trial' ? 'Start 14-Day Free Trial' : 'Continue to Paynow checkout'}
+              {submitting ? 'Please wait…' : checkoutButtonLabel(provider, registrationMode)}
             </Button>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary">

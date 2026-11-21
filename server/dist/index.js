@@ -57,6 +57,8 @@ const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const path_1 = __importDefault(require("path"));
 const propertyRoutes_1 = __importDefault(require("./routes/propertyRoutes"));
 const billingRoutes_1 = __importDefault(require("./routes/billingRoutes"));
+const dodoWebhookController_1 = require("./controllers/dodoWebhookController");
+const providerAvailability_1 = require("./services/subscriptionPayments/providerAvailability");
 const tenantRoutes_1 = __importDefault(require("./routes/tenantRoutes"));
 const leaseRoutes_1 = __importDefault(require("./routes/leaseRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
@@ -127,6 +129,7 @@ const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' 
 // Resolve the env file relative to the compiled/runtime directory so it works from both src/ and dist/
 const ENV_PATH = path_1.default.resolve(__dirname, '..', ENV_FILE);
 dotenv_1.default.config({ path: ENV_PATH });
+dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '..', '.env.local') });
 const app = (0, express_1.default)();
 const runtimeFeatures = (0, runtimeRole_1.getRuntimeFeatures)();
 function isMongoWaitQueueTimeout(error) {
@@ -327,6 +330,7 @@ app.use((0, cors_1.default)({
 // Add cookie-parser middleware
 app.use((0, cookie_parser_1.default)());
 const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '10mb';
+app.post('/api/billing/dodo/webhook', express_1.default.raw({ type: 'application/json', limit: '1mb' }), dodoWebhookController_1.handleDodoWebhook);
 app.use(express_1.default.json({ limit: requestBodyLimit }));
 app.use(express_1.default.urlencoded({ extended: true, limit: requestBodyLimit }));
 // Enable gzip compression
@@ -553,6 +557,7 @@ const { io } = (0, socket_1.initializeSocket)(httpServer);
 if (runtimeFeatures.runHttpServer) {
     httpServer.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
+        console.log((0, providerAvailability_1.describeDodoStartup)());
         console.log('Accounting API boot', {
             phase: '9',
             startedAt: new Date().toISOString(),

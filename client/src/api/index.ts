@@ -83,7 +83,10 @@ export const apiService = {
 
   // Property Owners
   // Billing
-  createCheckout: (data: { plan: 'INDIVIDUAL'|'SME'|'ENTERPRISE'; cycle: 'monthly'|'yearly' }) => apiInstance.post('/billing/checkout', data),
+  createCheckout: (data: { plan: 'INDIVIDUAL'|'SME'|'ENTERPRISE'; cycle: 'monthly'|'quarterly'|'yearly'; provider: 'paynow'|'dodo' }) => apiInstance.post('/billing/checkout', data),
+  getPaymentProviders: () => apiInstance.get('/billing/providers'),
+  getCheckoutSession: (id: string) => apiInstance.get(`/billing/sessions/${id}`),
+  reconcileDodoCheckout: (paymentSessionId: string, paymentId?: string) => apiInstance.post('/billing/dodo/reconcile', { paymentSessionId, paymentId }),
   getPaymentStatus: (id: string) => apiInstance.get(`/billing/payments/${id}/status`),
   changeSubscriptionPlan: (data: { plan?: 'INDIVIDUAL'|'SME'|'ENTERPRISE'; cycle?: 'monthly'|'yearly' }) => apiInstance.post('/billing/subscriptions/change-plan', data),
   redeemVoucher: (code: string, pin: string) => apiInstance.post('/billing/vouchers/redeem', { code, pin }),

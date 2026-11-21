@@ -71,7 +71,7 @@ function snapshotFor(property_1, companyId_1, amount_1) {
             paymentDate,
             commissionType: 'management'
         });
-        return { policy, flags, calc, snapshot: (0, propertyCommissionCalculator_1.toPaymentCommissionSnapshot)(calc) };
+        return { policy, flags, calc, snapshot: (0, vatPolicyService_1.stampVatDecision)((0, propertyCommissionCalculator_1.toPaymentCommissionSnapshot)(calc), policy) };
     });
 }
 function createCompletedPayment(input) {
@@ -139,7 +139,7 @@ function main() {
             tinNumber: 'VAT-LIFE-TIN',
             country: 'Zimbabwe',
             ownerId: user._id,
-            taxProfile: { vatRegistered: true, vatNumber: 'ZW-VAT-TEST' }
+            taxProfile: { vatRegistered: true, vatNumber: 'ZW-VAT-TEST', vatCategory: 'standard' }
         });
         const unregistered = yield Company_1.Company.create({
             name: 'VAT Lifecycle Unregistered',

@@ -62,6 +62,7 @@ const agentPaymentNotificationService_1 = require("../services/agentPaymentNotif
 const ownerRentNotificationService_1 = require("../services/ownerRentNotificationService");
 const paymentAccountingOrchestrator_1 = require("../services/paymentAccountingOrchestrator");
 const vatPolicyService_1 = require("../services/vatPolicyService");
+const commissionRateResolution_1 = require("../services/commissionRateResolution");
 const vatReturnService_1 = require("../services/vatReturnService");
 const taxObligationService_1 = require("../services/taxObligationService");
 const testFailureSeam_1 = require("../services/testFailureSeam");
@@ -833,6 +834,7 @@ const createPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 leaseId: lease._id,
                 rentAllocated: Number(amount || 0),
                 levyAllocated: 0,
+                commissionPercentage: property === null || property === void 0 ? void 0 : property.commission,
                 vatOnCommission: commissionVat.vatOnCommission,
                 vatTreatment: commissionVat.vatTreatment,
                 vatRate: commissionVat.vatRate,
@@ -1185,23 +1187,28 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
             let propertyVatOnCommission = false;
             let propertyVatTreatment;
             let propertyRentResolved = 0;
+            let storedCommissionPercentage;
             if (!manualProperty && rawPropertyId) {
                 const prop = yield Property_1.Property.findById(new mongoose_1.default.Types.ObjectId(rawPropertyId))
                     .select('commission rentalType ownerId vatOnCommission vatCommissionTreatment rent')
                     .lean();
                 if (prop) {
-                    if (typeof (prop === null || prop === void 0 ? void 0 : prop.commission) === 'number') {
-                        commissionPercentResolved = Number(prop.commission);
+                    storedCommissionPercentage = prop === null || prop === void 0 ? void 0 : prop.commission;
+                    const resolvedRate = (0, commissionRateResolution_1.resolveStoredCommissionPercentage)(storedCommissionPercentage);
+                    if (resolvedRate.ok) {
+                        commissionPercentResolved = resolvedRate.percent;
+                    }
+                    else if ((prop === null || prop === void 0 ? void 0 : prop.commission) !== undefined && (prop === null || prop === void 0 ? void 0 : prop.commission) !== null && (prop === null || prop === void 0 ? void 0 : prop.commission) !== '') {
+                        return { error: { status: 400, code: resolvedRate.code, message: resolvedRate.message } };
                     }
                     if (prop === null || prop === void 0 ? void 0 : prop.rentalType) {
                         rentalTypeResolved = prop.rentalType;
                     }
                     propertyVatOnCommission = Boolean(prop === null || prop === void 0 ? void 0 : prop.vatOnCommission);
                     propertyRentResolved = Number((prop === null || prop === void 0 ? void 0 : prop.rent) || 0);
-                    if (propertyVatOnCommission) {
-                        propertyVatTreatment = String((prop === null || prop === void 0 ? void 0 : prop.vatCommissionTreatment) || '').toLowerCase() === 'inclusive'
-                            ? 'inclusive'
-                            : 'exclusive';
+                    const rawVatTreatment = String((prop === null || prop === void 0 ? void 0 : prop.vatCommissionTreatment) || '').trim().toLowerCase();
+                    if (rawVatTreatment === 'inclusive' || rawVatTreatment === 'exclusive') {
+                        propertyVatTreatment = rawVatTreatment;
                     }
                     if (!resolvedOwnerId && (prop === null || prop === void 0 ? void 0 : prop.ownerId)) {
                         resolvedOwnerId = String(prop.ownerId);
@@ -1264,6 +1271,7 @@ const createPaymentAccountant = (req, res) => __awaiter(void 0, void 0, void 0, 
                         leaseId: rawLeaseId,
                         rentAllocated: isDepositOnly ? 0 : Math.max(0, commissionBaseAmount),
                         levyAllocated: isDepositOnly ? 0 : levyAllocated,
+                        commissionPercentage: storedCommissionPercentage,
                         vatOnCommission: propertyVatOnCommission,
                         vatTreatment: propertyVatTreatment,
                         vatRate: commissionVat.vatRate,
@@ -2557,7 +2565,7 @@ const getPaymentAccountingReconciliation = (req, res) => __awaiter(void 0, void 
 });
 exports.getPaymentAccountingReconciliation = getPaymentAccountingReconciliation;
 const repairPaymentAccountingExplicit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     if (!req.user) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
@@ -2576,11 +2584,18 @@ const repairPaymentAccountingExplicit = (req, res) => __awaiter(void 0, void 0, 
         if (!dryRun && !reason) {
             return res.status(400).json({ message: 'Manual accounting repair requires confirm=true, dryRun=false, and a non-empty reason' });
         }
+        const approveHistoricalVatObligation = ((_d = req.body) === null || _d === void 0 ? void 0 : _d.approveHistoricalVatObligation) === true;
+        if (!dryRun && approveHistoricalVatObligation && reason.toLowerCase().indexOf('approve historical vat') === -1) {
+            return res.status(400).json({
+                message: 'Historical VAT obligation approval requires the reason to include "approve historical VAT". A normal repair reason is not approval.'
+            });
+        }
         const result = yield (0, paymentAccountingReconciliation_1.repairPaymentAccounting)(String(payment._id), {
             dryRun,
             reason,
             userId: req.user.userId,
-            createdBy: req.user.userId
+            createdBy: req.user.userId,
+            approveHistoricalVatObligation
         });
         return res.json(result);
     }
@@ -3454,6 +3469,7 @@ const createPaymentPublic = (req, res) => __awaiter(void 0, void 0, void 0, func
                 leaseId: lease._id,
                 rentAllocated: Number(amount || 0),
                 levyAllocated: 0,
+                commissionPercentage: property === null || property === void 0 ? void 0 : property.commission,
                 vatOnCommission: commissionVat.vatOnCommission,
                 vatTreatment: commissionVat.vatTreatment,
                 vatRate: commissionVat.vatRate,
@@ -4064,6 +4080,7 @@ const finalizeProvisionalPayment = (req, res) => __awaiter(void 0, void 0, void 
                     leaseId: req.body.leaseId || payment.leaseId,
                     rentAllocated: isDepositOnly ? 0 : Math.max(0, Number(payment.rentAllocated || payment.amount || 0)),
                     levyAllocated: isDepositOnly ? 0 : Number(payment.levyAllocated || 0),
+                    commissionPercentage: property === null || property === void 0 ? void 0 : property.commission,
                     vatOnCommission: commissionVat.vatOnCommission,
                     vatTreatment: commissionVat.vatTreatment,
                     vatRate: commissionVat.vatRate,

@@ -154,6 +154,8 @@ function activateSubscriptionFromPayment(input) {
         const periodEnd = new Date(now);
         if (paymentSession.billingCycle === 'yearly')
             periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+        else if (paymentSession.billingCycle === 'quarterly')
+            periodEnd.setMonth(periodEnd.getMonth() + 3);
         else
             periodEnd.setMonth(periodEnd.getMonth() + 1);
         const subscriptionQuery = paymentSession.subscriptionId

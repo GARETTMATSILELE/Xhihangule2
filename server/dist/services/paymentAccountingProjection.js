@@ -11,6 +11,7 @@ const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const paymentAccountingCompleteness_1 = require("./paymentAccountingCompleteness");
 const commissionProjection_1 = require("./commissionProjection");
 const money_1 = require("../utils/money");
+const accountingIntegrityClassification_1 = require("./accountingIntegrityClassification");
 const emptyAmounts = () => ({
     ownerIncome: 0,
     agentCommission: 0,
@@ -85,12 +86,15 @@ function buildExpectedAccountingProjection(payment) {
     amounts.companyCommission = agencyShare;
     amounts.journal = amount;
     amounts.vat = vatAmountOnPayment(payment);
+    const explainedZeroOwner = amount > 0
+        && computedIncome <= 0
+        && (0, accountingIntegrityClassification_1.receiptExplainedByCommissionSnapshot)(payment);
     return {
         policyAllowed: true,
         reason: policy.reason,
-        // Positive cash with a zero owner share is not fully accounted.
-        // Do not invent an income row; leave the component missing.
-        ownerIncome: !policy.skipOwnerIncome && amount > 0,
+        // A snapshot that calculates zero owner income is not an expected income row.
+        // Cash that is not explained by the snapshot still requires owner income.
+        ownerIncome: !policy.skipOwnerIncome && amount > 0 && !explainedZeroOwner,
         agentCommission: !policy.skipAgentCommission && agentAmount > 0,
         companyCommission: !policy.skipCompanyCommission && agencyShare > 0,
         journal: journalExpected,

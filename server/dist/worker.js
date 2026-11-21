@@ -23,6 +23,7 @@ const accountingPeriodService_1 = require("./services/accountingPeriodService");
 const ENV_FILE = process.env.ENV_FILE || (process.env.NODE_ENV === 'production' ? '.env.production' : '.env');
 const ENV_PATH = path_1.default.resolve(__dirname, '..', ENV_FILE);
 dotenv_1.default.config({ path: ENV_PATH });
+dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '..', '.env.local') });
 const runtimeFeatures = (0, runtimeRole_1.getRuntimeFeatures)();
 const startWorker = () => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Starting worker runtime with configuration:', {

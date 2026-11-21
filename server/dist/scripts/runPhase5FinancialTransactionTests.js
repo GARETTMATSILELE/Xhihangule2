@@ -39,6 +39,7 @@ function introSnapshot(rentAllocated, alreadyConsumed, levyAllocated = 0, oneMon
         alreadyConsumed
     });
     const calculated = (0, introductionCommissionService_1.snapshotFromIntroductionAllocation)(allocation, {
+        commissionPercentage: 100,
         vatOnCommission: false,
         preaPercentOfTotal: 0.03,
         agentPercentOfRemaining: 0.6,

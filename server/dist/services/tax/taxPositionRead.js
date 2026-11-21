@@ -20,6 +20,8 @@ const TaxRecord_1 = require("../../models/TaxRecord");
 const TaxPayout_1 = require("../../models/TaxPayout");
 const TrustAccount_1 = require("../../models/TrustAccount");
 const Property_1 = require("../../models/Property");
+const Payment_1 = require("../../models/Payment");
+const taxDashboard_1 = require("./taxDashboard");
 const ChartOfAccount_1 = require("../../models/ChartOfAccount");
 const chartAccounts_1 = require("./chartAccounts");
 const taxPosition_1 = require("./taxPosition");
@@ -42,33 +44,58 @@ function loadCompanyTaxPosition(companyId, asOf) {
             }).select('code balance').lean()
         ]);
         const trustIds = [...records, ...payouts].map((row) => row.trustAccountId).filter(Boolean);
-        const trusts = trustIds.length
-            ? yield TrustAccount_1.TrustAccount.find({ _id: { $in: trustIds }, companyId: company }).select('propertyId').lean()
-            : [];
+        const missingPropertyPaymentIds = obligations
+            .filter((row) => !row.propertyId && row.paymentId)
+            .map((row) => row.paymentId);
+        const [trusts, sourcePayments] = yield Promise.all([
+            trustIds.length
+                ? TrustAccount_1.TrustAccount.find({ _id: { $in: trustIds }, companyId: company }).select('propertyId').lean()
+                : [],
+            missingPropertyPaymentIds.length
+                ? Payment_1.Payment.find({ _id: { $in: missingPropertyPaymentIds }, companyId: company }).select('propertyId').lean()
+                : []
+        ]);
         const trustProperty = new Map(trusts.map((row) => [String(row._id), row.propertyId ? String(row.propertyId) : '']));
+        const paymentProperty = new Map(sourcePayments.map((row) => [String(row._id), row.propertyId ? String(row.propertyId) : '']));
+        const propertyIdOf = (row) => (0, taxDashboard_1.resolveLinkedPropertyId)({
+            obligationPropertyId: row.propertyId ? String(row.propertyId) : null,
+            paymentPropertyId: row.paymentId ? paymentProperty.get(String(row.paymentId)) : null
+        });
         const propertyIds = [
-            ...obligations.map((row) => row.propertyId),
+            ...obligations.map((row) => propertyIdOf(row)),
             ...trusts.map((row) => row.propertyId)
         ].filter(Boolean);
         const properties = propertyIds.length
             ? yield Property_1.Property.find({ _id: { $in: propertyIds }, companyId: company }).select('name address').lean()
             : [];
-        const propertyName = new Map(properties.map((row) => [String(row._id), String(row.name || row.address || '')]));
-        const nameOf = (id) => (id ? propertyName.get(String(id)) || String(id) : undefined);
+        const propertyById = new Map(properties.map((row) => [String(row._id), row]));
+        const nameOf = (id) => {
+            if (!id)
+                return undefined;
+            const property = propertyById.get(String(id));
+            const name = String((property === null || property === void 0 ? void 0 : property.name) || '').trim();
+            const address = (0, taxDashboard_1.formatPropertyAddress)(property === null || property === void 0 ? void 0 : property.address);
+            return name || address || String(id);
+        };
+        const addressOf = (id) => { var _a; return (id ? (0, taxDashboard_1.formatPropertyAddress)((_a = propertyById.get(String(id))) === null || _a === void 0 ? void 0 : _a.address) : ''); };
         return (0, taxPosition_1.buildTaxPosition)({
             asOf,
-            obligations: obligations.map((row) => ({
-                id: String(row._id),
-                taxType: String(row.taxType),
-                propertyId: row.propertyId ? String(row.propertyId) : null,
-                propertyName: nameOf(row.propertyId),
-                paymentId: row.paymentId ? String(row.paymentId) : null,
-                taxPeriod: String(row.taxPeriod || ''),
-                taxAmount: Number(row.taxAmount || 0),
-                status: String(row.status || ''),
-                reversalOf: row.reversalOf ? String(row.reversalOf) : null,
-                transactionDate: row.transactionDate
-            })),
+            obligations: obligations.map((row) => {
+                const propertyId = propertyIdOf(row);
+                return {
+                    id: String(row._id),
+                    taxType: String(row.taxType),
+                    propertyId,
+                    propertyName: nameOf(propertyId),
+                    propertyAddress: addressOf(propertyId),
+                    paymentId: row.paymentId ? String(row.paymentId) : null,
+                    taxPeriod: String(row.taxPeriod || ''),
+                    taxAmount: Number(row.taxAmount || 0),
+                    status: String(row.status || ''),
+                    reversalOf: row.reversalOf ? String(row.reversalOf) : null,
+                    transactionDate: row.transactionDate
+                };
+            }),
             payments: payments.map((row) => ({
                 id: String(row._id),
                 status: String(row.status || ''),
@@ -88,6 +115,7 @@ function loadCompanyTaxPosition(companyId, asOf) {
                     taxType: String(row.taxType),
                     propertyId,
                     propertyName: nameOf(propertyId),
+                    propertyAddress: addressOf(propertyId),
                     amount: Number(row.amount || 0),
                     createdAt: row.createdAt
                 };
@@ -99,6 +127,7 @@ function loadCompanyTaxPosition(companyId, asOf) {
                     taxType: String(row.taxType),
                     propertyId,
                     propertyName: nameOf(propertyId),
+                    propertyAddress: addressOf(propertyId),
                     amount: Number(row.amount || 0),
                     createdAt: row.payoutDate || row.createdAt
                 };
