@@ -19,7 +19,8 @@ cd server && npm install
 cd ../client && npm install
 
 # Environment setup
-# Create .env files in server/ and client/ directories
+# Copy .env.example to server/.env.local and keep that file untracked.
+# Put production values in Azure App Service, not in Git.
 ```
 
 ### Environment Variables
@@ -339,13 +340,24 @@ const useForm = <T>(initialValues: T, validationSchema: any) => {
 ## Deployment
 
 ### Environment Setup
+
+Create a dedicated database user for each environment. Give that user access only to its own database. Do not reuse a production user for local development, and do not give application users cluster administration rights.
+
+Store the connection string in an environment variable. Local development uses `server/.env.local`, which is gitignored. Production uses the Azure App Service configuration for `mantisafrica`. Do not commit either file.
+
 ```bash
-# Production environment
+# Local development, in server/.env.local
+NODE_ENV=development
+MONGODB_URI=mongodb://127.0.0.1:27017/property-management
+
+# Production, set in Azure App Service and never in Git
 NODE_ENV=production
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database
-JWT_SECRET=your-production-secret
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>/<database>
+JWT_SECRET=<long-random-secret>
 CORS_ORIGIN=https://your-domain.com
 ```
+
+Replace `<username>`, `<password>`, `<cluster>`, and `<database>` in a secret store. The angle brackets are not a working connection string. Copy `.env.example` when creating a local file, and keep real credentials out of documentation, Docker images, and commits.
 
 ### Build Process
 ```bash

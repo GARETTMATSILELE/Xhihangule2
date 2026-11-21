@@ -34,7 +34,7 @@ function configure(extra: Record<string, string | undefined> = {}) {
   process.env.DODO_PAYMENTS_ENABLED = 'true';
   process.env.DODO_PAYMENTS_MODE = 'test';
   process.env.DODO_PAYMENTS_API_KEY = 'dodo_test_key';
-  process.env.DODO_PAYMENTS_WEBHOOK_KEY = 'whsec_dGVzdC1zaWduaW5nLXNlY3JldA==';
+  process.env.DODO_PAYMENTS_WEBHOOK_KEY = 'dodo-test-webhook-not-a-provider-secret';
   process.env.DODO_PAYMENTS_RETURN_URL = 'http://localhost:3000/billing/return';
   process.env.DODO_PAYMENTS_PRODUCT_INDIVIDUAL_MONTHLY = 'pdt_individual_monthly';
   process.env.DODO_PAYMENTS_PRODUCT_INDIVIDUAL_ANNUAL = 'pdt_individual_annual';

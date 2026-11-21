@@ -11,10 +11,13 @@
 
 # misc
 .DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+
+# Secrets stay on the machine or in Azure. Example files remain tracked.
+.env
+.env.*
+!.env.example
+!**/.env.example
+!**/*.env.example
 
 # logs
 *.log

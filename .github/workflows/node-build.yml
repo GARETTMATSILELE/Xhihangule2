@@ -22,6 +22,8 @@ jobs:
             client/package-lock.json
             server/package-lock.json
             package-lock.json
+      - name: Scan tracked files for credentials
+        run: node scripts/scan-secrets.js
       - name: Show npm version and config
         run: |
           node -v

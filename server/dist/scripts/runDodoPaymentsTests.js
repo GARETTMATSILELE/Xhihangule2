@@ -38,7 +38,7 @@ const dodoWebhookController_1 = require("../controllers/dodoWebhookController");
 const billingActivationService_1 = require("../services/billingActivationService");
 const paynowCallbackService_1 = require("../services/paynowCallbackService");
 const TEST_DB = 'mongodb://127.0.0.1:27017/mantis_dodo_payments_test';
-const WEBHOOK_KEY = `whsec_${Buffer.alloc(24, 7).toString('base64')}`;
+const WEBHOOK_KEY = Buffer.alloc(24, 7).toString('base64');
 const failures = [];
 function check(condition, message) {
     if (!condition)
