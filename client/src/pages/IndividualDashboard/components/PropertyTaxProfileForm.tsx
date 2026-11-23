@@ -72,6 +72,19 @@ export function PropertyTaxProfileForm({ propertyId }: Props) {
       {saved && <Alert severity="success">Property tax profile saved. Historical amounts were not rewritten.</Alert>}
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6}>
+          <TextField select fullWidth label="Property location" value={profile.locationCountry || ''} onChange={(e) => update({ locationCountry: e.target.value })}>
+            <MenuItem value="">Same as tax profile</MenuItem>
+            <MenuItem value="ZW">Zimbabwe</MenuItem>
+            <MenuItem value="ZA">South Africa</MenuItem>
+            <MenuItem value="GLOBAL">Other country</MenuItem>
+          </TextField>
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField select fullWidth label="Operating currency" value={profile.operatingCurrency || 'USD'} onChange={(e) => update({ operatingCurrency: e.target.value })}>
+            {['USD', 'ZAR', 'EUR', 'GBP', 'ZWG'].map((code) => <MenuItem key={code} value={code}>{code}</MenuItem>)}
+          </TextField>
+        </Grid>
+        <Grid item xs={12} sm={6}>
           <TextField
             select
             fullWidth

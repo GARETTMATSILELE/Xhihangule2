@@ -15,6 +15,7 @@ import {
   type TaxpayerType
 } from './tax/rentalTaxTypes';
 import { ensureSystemTaxRules, listTaxRules, type TaxRuleRecord } from './taxRuleRegistry';
+import { resolveIndividualJurisdiction, type JurisdictionCode } from './individualJurisdiction/publishedRules';
 
 export type OwnerTaxProfile = {
   companyId: string;
@@ -34,6 +35,13 @@ export type OwnerTaxProfile = {
   rentalTaxRegime: RentalTaxRegime;
   rentalTaxRegistrationDate: string | null;
   taxResidence: string;
+  countryOfResidence: string;
+  taxResidencyCountry: string;
+  preferredCurrency: string;
+  taxJurisdiction: JurisdictionCode;
+  enabledTaxes: string[];
+  saProfile: Record<string, unknown>;
+  globalTaxes: Array<Record<string, unknown>>;
   taxYearStartMonth: number;
   accountantName: string;
   accountantContact: string;
@@ -61,6 +69,8 @@ export type PropertyTaxProfile = {
   acquisitionCost: number | null;
   improvementCost: number | null;
   taxNotes: string;
+  locationCountry: string;
+  operatingCurrency: string;
   reviewRequired: boolean;
   reviewReasons: string[];
   disclaimer: string;
@@ -134,8 +144,10 @@ export const individualTaxProfileService = {
     const company = await Company.findById(asObjectId(companyId, 'companyId'));
     if (!company) throw new AppError('Company not found', 404);
     const stored = await IndividualTaxProfile.findOne({ companyId: company._id });
-    const rules = await listTaxRules();
+    const taxJurisdiction = resolveIndividualJurisdiction(stored?.taxJurisdiction, stored?.taxResidence || (company as any).country);
+    const rules = await listTaxRules(undefined, taxJurisdiction);
     const taxProfile = (company as any).taxProfile || {};
+    const enabledTaxes = Array.isArray(stored?.enabledTaxes) ? stored!.enabledTaxes : [];
 
     return {
       companyId: String(company._id),
@@ -155,8 +167,15 @@ export const individualTaxProfileService = {
       incomeTaxRegistrationDate: isoDate(stored?.incomeTaxRegistrationDate),
       rentalTaxRegime: normalizeRentalTaxRegime(stored?.rentalTaxRegime),
       rentalTaxRegistrationDate: isoDate(stored?.rentalTaxRegistrationDate),
-      taxResidence: stored?.taxResidence || 'ZW',
-      taxYearStartMonth: Number(stored?.taxYearStartMonth || 1),
+      taxResidence: stored?.taxResidence || taxJurisdiction,
+      countryOfResidence: stored?.countryOfResidence || stored?.taxResidence || String((company as any).country || taxJurisdiction),
+      taxResidencyCountry: stored?.taxResidencyCountry || stored?.taxResidence || taxJurisdiction,
+      preferredCurrency: stored?.preferredCurrency || 'USD',
+      taxJurisdiction,
+      enabledTaxes,
+      saProfile: (stored?.saProfile as Record<string, unknown>) || {},
+      globalTaxes: Array.isArray(stored?.globalTaxes) ? stored!.globalTaxes as Array<Record<string, unknown>> : [],
+      taxYearStartMonth: Number(stored?.taxYearStartMonth || (taxJurisdiction === 'ZA' ? 3 : 1)),
       accountantName: stored?.accountantName || '',
       accountantContact: stored?.accountantContact || '',
       taxNotes: stored?.taxNotes || '',
@@ -207,6 +226,24 @@ export const individualTaxProfileService = {
     if (rentalTaxRegistrationDate !== undefined) profileSet.rentalTaxRegistrationDate = rentalTaxRegistrationDate;
     const taxResidence = optionalString(payload.taxResidence);
     if (taxResidence !== undefined) profileSet.taxResidence = taxResidence;
+    const countryOfResidence = optionalString(payload.countryOfResidence);
+    if (countryOfResidence !== undefined) profileSet.countryOfResidence = countryOfResidence;
+    const taxResidencyCountry = optionalString(payload.taxResidencyCountry);
+    if (taxResidencyCountry !== undefined) {
+      profileSet.taxResidencyCountry = taxResidencyCountry;
+      if (taxResidence === undefined) profileSet.taxResidence = taxResidencyCountry;
+    }
+    const preferredCurrency = optionalString(payload.preferredCurrency);
+    if (preferredCurrency !== undefined) profileSet.preferredCurrency = preferredCurrency.toUpperCase();
+    if (payload.taxJurisdiction !== undefined) {
+      const jurisdiction = resolveIndividualJurisdiction(String(payload.taxJurisdiction));
+      profileSet.taxJurisdiction = jurisdiction;
+    }
+    if (Array.isArray(payload.enabledTaxes)) {
+      profileSet.enabledTaxes = payload.enabledTaxes.map((item) => String(item));
+    }
+    if (payload.saProfile && typeof payload.saProfile === 'object') profileSet.saProfile = payload.saProfile;
+    if (Array.isArray(payload.globalTaxes)) profileSet.globalTaxes = payload.globalTaxes;
     if (taxYearStartMonth !== undefined) profileSet.taxYearStartMonth = taxYearStartMonth;
     const accountantName = optionalString(payload.accountantName);
     if (accountantName !== undefined) profileSet.accountantName = accountantName;
@@ -247,7 +284,7 @@ export const individualTaxProfileService = {
       eventType: 'TAX_PROFILE_UPDATED',
       sourceId: companyId,
       message: 'Updated individual landlord tax profile',
-      metadata: { before, after, userId }
+      metadata: { before, after, userId, historicalSnapshotsPreserved: true }
     });
     return after;
   },
@@ -286,6 +323,8 @@ export const individualTaxProfileService = {
       acquisitionCost: property.acquisitionCost == null ? null : Number(property.acquisitionCost),
       improvementCost: property.improvementCosts == null ? null : Number(property.improvementCosts),
       taxNotes: String((property as any).taxNotes || ''),
+      locationCountry: String((property as any).locationCountry || ''),
+      operatingCurrency: String((property as any).operatingCurrency || 'USD'),
       reviewRequired: reviewReasons.length > 0,
       reviewReasons,
       disclaimer: TAX_DISCLAIMER
@@ -357,6 +396,10 @@ export const individualTaxProfileService = {
     }
     const taxNotes = optionalString(payload.taxNotes);
     if (taxNotes !== undefined) $set.taxNotes = taxNotes;
+    const locationCountry = optionalString(payload.locationCountry);
+    if (locationCountry !== undefined) $set.locationCountry = locationCountry;
+    const operatingCurrency = optionalString(payload.operatingCurrency);
+    if (operatingCurrency !== undefined) $set.operatingCurrency = operatingCurrency.toUpperCase();
 
     if (Object.keys($set).length) {
       await Property.updateOne({ _id: property._id }, { $set });

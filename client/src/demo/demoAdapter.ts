@@ -2,6 +2,19 @@ import type { AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } fr
 import { DEMO_BLOCKED_MESSAGE, isDemoMode, notifyDemoBlocked } from './demoMode';
 import { resolveDemoGet } from './demoData';
 
+function demoRequestUrl(config: AxiosRequestConfig) {
+  const base = String(config.url || '');
+  const params = config.params;
+  if (!params || typeof params !== 'object') return base;
+  const search = new URLSearchParams();
+  Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
+    if (value != null && value !== '') search.set(key, String(value));
+  });
+  const extra = search.toString();
+  if (!extra) return base;
+  return `${base}${base.includes('?') ? '&' : '?'}${extra}`;
+}
+
 function asResponse(config: AxiosRequestConfig, data: unknown): AxiosResponse {
   return {
     data,
@@ -24,7 +37,7 @@ export async function demoAdapter(config: AxiosRequestConfig): Promise<AxiosResp
     };
     return Promise.reject(error);
   }
-  return asResponse(config, resolveDemoGet(String(config.url || '')));
+  return asResponse(config, resolveDemoGet(demoRequestUrl(config)));
 }
 
 export function attachDemoAdapter(config: InternalAxiosRequestConfig): InternalAxiosRequestConfig {

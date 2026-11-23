@@ -6,13 +6,13 @@ export const INDIVIDUAL_THEME = {
   warning: '#ea580c',
   danger: '#dc2626',
   neutral: '#6b7280',
-  background: '#f4f7f5',
+  background: '#F4F5F2',
   surface: '#ffffff',
-  sidebarBg: '#084734',
+  sidebarBg: '#00452F',
   sidebarText: '#ffffff',
-  sidebarMuted: 'rgba(255,255,255,0.65)',
-  sidebarActive: 'rgba(255,255,255,0.15)',
-  border: '#e5e7eb'
+  sidebarMuted: 'rgba(255,255,255,0.62)',
+  sidebarActive: '#0F6E49',
+  border: '#E6EBE8'
 } as const;
 
 export function healthScoreColor(score: number): string {

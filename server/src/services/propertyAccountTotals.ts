@@ -87,28 +87,137 @@ export function computePropertyAccountTotals(account: {
   };
 }
 
+type PnlKind = 'income' | 'expense';
+
+function forEachPnlAmount(
+  transactions: any[] | undefined,
+  start: Date | undefined,
+  end: Date | undefined,
+  visit: (entry: any, amount: number, kind: PnlKind) => void
+) {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  for (const t of rows) {
+    if (!isActiveStatus(t?.status) || !isPnlRow(t)) continue;
+    const date = t?.date ? new Date(t.date) : null;
+    if (start && date && date < start) continue;
+    if (end && date && date >= end) continue;
+    const amount = Number(t.amount || 0);
+    if (t?.type === 'income') visit(t, amount, 'income');
+    else if (t?.type !== 'opening_balance') visit(t, amount, 'expense');
+  }
+}
+
+function roundMoney(value: number) {
+  return Number(value.toFixed(2));
+}
+
+function entryCurrency(entry: any, fallbackCurrency: string) {
+  const currency = String(entry?.currency || fallbackCurrency || 'USD').trim();
+  return currency || fallbackCurrency || 'USD';
+}
+
 export function sumPropertyAccountPeriodPnl(
   transactions: any[] | undefined,
   start?: Date,
   end?: Date
 ): { income: number; expenses: number; net: number } {
-  const rows = Array.isArray(transactions) ? transactions : [];
   let income = 0;
   let expenses = 0;
-  for (const t of rows) {
-    if (!isActiveStatus(t.status) || !isPnlRow(t)) continue;
-    const date = t?.date ? new Date(t.date) : null;
+  forEachPnlAmount(transactions, start, end, (_entry, amount, kind) => {
+    if (kind === 'income') income += amount;
+    else expenses += amount;
+  });
+  return {
+    income: roundMoney(income),
+    expenses: roundMoney(expenses),
+    net: roundMoney(income - expenses)
+  };
+}
+
+export type CurrencyPnl = { currency: string; income: number; expenses: number; net: number };
+
+export function sumPropertyAccountPeriodPnlByCurrency(
+  transactions: any[] | undefined,
+  start: Date | undefined,
+  end: Date | undefined,
+  fallbackCurrency = 'USD'
+): CurrencyPnl[] {
+  const buckets = new Map<string, { income: number; expenses: number }>();
+  forEachPnlAmount(transactions, start, end, (entry, amount, kind) => {
+    const currency = entryCurrency(entry, fallbackCurrency);
+    const bucket = buckets.get(currency) || { income: 0, expenses: 0 };
+    if (kind === 'income') bucket.income += amount;
+    else bucket.expenses += amount;
+    buckets.set(currency, bucket);
+  });
+  return Array.from(buckets.entries())
+    .map(([currency, bucket]) => ({
+      currency,
+      income: roundMoney(bucket.income),
+      expenses: roundMoney(bucket.expenses),
+      net: roundMoney(bucket.income - bucket.expenses)
+    }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+export type PnlSeriesPoint = { month: string; income: number; expenses: number; net: number };
+
+export function sumPropertyAccountPeriodSeries(
+  transactions: any[] | undefined,
+  start: Date | undefined,
+  end: Date | undefined,
+  monthOf: (date: Date) => string,
+  fallbackCurrency = 'USD'
+): Array<{ currency: string; points: PnlSeriesPoint[] }> {
+  const buckets = new Map<string, Map<string, { income: number; expenses: number }>>();
+  forEachPnlAmount(transactions, start, end, (entry, amount, kind) => {
+    const date = entry?.date ? new Date(entry.date) : null;
+    if (!date || Number.isNaN(date.getTime())) return;
+    const currency = entryCurrency(entry, fallbackCurrency);
+    const month = monthOf(date);
+    if (!buckets.has(currency)) buckets.set(currency, new Map());
+    const months = buckets.get(currency)!;
+    const point = months.get(month) || { income: 0, expenses: 0 };
+    if (kind === 'income') point.income += amount;
+    else point.expenses += amount;
+    months.set(month, point);
+  });
+  return Array.from(buckets.entries())
+    .map(([currency, months]) => ({
+      currency,
+      points: Array.from(months.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, point]) => ({
+          month,
+          income: roundMoney(point.income),
+          expenses: roundMoney(point.expenses),
+          net: roundMoney(point.income - point.expenses)
+        }))
+    }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+export function sumPendingOperatingBills(
+  transactions: any[] | undefined,
+  start?: Date,
+  end?: Date,
+  fallbackCurrency = 'USD'
+): Array<{ currency: string; amount: number }> {
+  const rows = Array.isArray(transactions) ? transactions : [];
+  const buckets = new Map<string, number>();
+  for (const entry of rows) {
+    if (String(entry?.status || '') !== 'pending') continue;
+    if (!isPnlRow(entry)) continue;
+    if (entry?.type === 'income' || entry?.type === 'opening_balance') continue;
+    const date = entry?.date ? new Date(entry.date) : null;
     if (start && date && date < start) continue;
     if (end && date && date >= end) continue;
-    const amount = Number(t.amount || 0);
-    if (t?.type === 'income') income += amount;
-    else if (t?.type !== 'opening_balance') expenses += amount;
+    const currency = entryCurrency(entry, fallbackCurrency);
+    buckets.set(currency, (buckets.get(currency) || 0) + Number(entry.amount || 0));
   }
-  return {
-    income: Number(income.toFixed(2)),
-    expenses: Number(expenses.toFixed(2)),
-    net: Number((income - expenses).toFixed(2))
-  };
+  return Array.from(buckets.entries())
+    .map(([currency, amount]) => ({ currency, amount: roundMoney(amount) }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
 export function computeAgentAccountTotals(account: { transactions?: any[] }): {

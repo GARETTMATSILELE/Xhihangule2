@@ -249,6 +249,8 @@ const PropertySchema = new mongoose_1.Schema({
         required: false
     },
     rentalTaxEffectiveFrom: { type: Date, required: false },
+    locationCountry: { type: String, required: false, trim: true },
+    operatingCurrency: { type: String, required: false, trim: true, uppercase: true },
     ownershipPercentage: { type: Number, required: false, min: 0, max: 100, default: 100 },
     taxNotes: { type: String, required: false, trim: true },
     acquisitionCost: { type: Number, required: false, min: 0 },
@@ -322,7 +324,44 @@ const PropertySchema = new mongoose_1.Schema({
     deposit: { type: Number, min: 0, required: false },
     paymentTerms: { type: String, required: false },
     leaseRequirements: { type: String, required: false },
-    videos: [{ type: String }]
+    videos: [{ type: String }],
+    city: { type: String, required: false, trim: true },
+    rentFrequency: {
+        type: String,
+        enum: ['monthly', 'weekly', 'quarterly', 'annually'],
+        default: 'monthly'
+    },
+    rentDueDay: { type: Number, min: 1, max: 28, required: false },
+    rentEffectiveFrom: { type: Date, required: false },
+    pendingRent: { type: Number, min: 0, required: false },
+    pendingRentFrequency: {
+        type: String,
+        enum: ['monthly', 'weekly', 'quarterly', 'annually'],
+        required: false
+    },
+    pendingRentDueDay: { type: Number, min: 1, max: 28, required: false },
+    pendingPaymentTerms: { type: String, required: false },
+    pendingRentEffectiveFrom: { type: Date, required: false },
+    rentHistory: [{
+            amount: { type: Number, min: 0 },
+            currency: { type: String, trim: true },
+            frequency: { type: String },
+            dueDay: { type: Number },
+            effectiveFrom: { type: Date },
+            terms: { type: String },
+            recordedAt: { type: Date }
+        }],
+    recurringCharges: [{
+            chargeId: { type: String, required: true },
+            description: { type: String, trim: true, default: '' },
+            category: { type: String, enum: ['Levy', 'Municipal', 'Utilities', 'Insurance', 'Other'], required: true },
+            amount: { type: Number, min: 0, default: 0 },
+            currency: { type: String, trim: true, uppercase: true, default: 'USD' },
+            frequency: { type: String, enum: ['monthly', 'quarterly', 'annually'], default: 'monthly' },
+            effectiveFrom: { type: Date },
+            active: { type: Boolean, default: true }
+        }],
+    parkingSpaces: { type: Number, min: 0, required: false }
 }, {
     timestamps: true
 });

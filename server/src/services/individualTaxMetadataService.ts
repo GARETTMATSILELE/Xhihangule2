@@ -13,6 +13,7 @@ import { isDepositOnlyPayment } from './accountingPostingPolicy';
 import { findPeriodForDate } from './accountingPeriodService';
 import individualTaxProfileService from './individualTaxProfileService';
 import { getEffectiveTaxRule } from './taxRuleRegistry';
+import { resolveIndividualJurisdiction } from './individualJurisdiction/publishedRules';
 import { buildTaxClassification } from './taxClassificationService';
 import { assertTaxPeriodsAllowPosting, resolveRelevantTaxPeriods } from './taxPeriodService';
 import type { TaxPeriodTaxType, TransactionTaxSourceKind } from './tax/taxMetadataTypes';
@@ -164,13 +165,19 @@ async function persistSnapshot(input: {
 }
 
 async function loadClassificationContext(companyId: string, propertyId: string, transactionDate: Date) {
-  const [owner, propertyProfile, vatRule, presumptiveRule, incomeTaxRule, company] = await Promise.all([
+  const [owner, propertyProfile, company] = await Promise.all([
     individualTaxProfileService.getOwnerProfile(companyId),
     individualTaxProfileService.getPropertyProfile(companyId, propertyId),
-    getEffectiveTaxRule('VAT', transactionDate),
-    getEffectiveTaxRule('PRESUMPTIVE_RENTAL_INCOME_TAX', transactionDate),
-    getEffectiveTaxRule('INCOME_TAX', transactionDate),
     Company.findById(companyId).select('taxProfile vatNumber').lean()
+  ]);
+  const propertyJurisdiction = resolveIndividualJurisdiction(propertyProfile.locationCountry, owner.taxJurisdiction);
+  const residencyJurisdiction = resolveIndividualJurisdiction(owner.taxResidencyCountry || owner.taxResidence, owner.taxJurisdiction);
+  const attachZwPropertyRules = propertyJurisdiction === 'ZW';
+  const attachZwIncomeRule = propertyJurisdiction === 'ZW' && residencyJurisdiction === 'ZW';
+  const [vatRule, presumptiveRule, incomeTaxRule] = await Promise.all([
+    attachZwPropertyRules ? getEffectiveTaxRule('VAT', transactionDate, 'ZW') : Promise.resolve(null),
+    attachZwPropertyRules ? getEffectiveTaxRule('PRESUMPTIVE_RENTAL_INCOME_TAX', transactionDate, 'ZW') : Promise.resolve(null),
+    attachZwIncomeRule ? getEffectiveTaxRule('INCOME_TAX', transactionDate, 'ZW') : Promise.resolve(null)
   ]);
   const taxProfile = (company as any)?.taxProfile || {};
   return { owner, propertyProfile, vatRule, presumptiveRule, incomeTaxRule, taxProfile };

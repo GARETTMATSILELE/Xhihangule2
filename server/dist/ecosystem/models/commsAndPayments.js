@@ -49,6 +49,7 @@ const CommunicationPreferenceSchema = new mongoose_1.Schema({
     whatsappMarketing: { type: Boolean, default: false },
     phone: { type: String },
     whatsappNumber: { type: String },
+    individualEvents: { type: mongoose_1.Schema.Types.Mixed, required: false },
 }, { timestamps: true, collection: 'communication_preferences' });
 exports.CommunicationPreference = mongoose_1.default.model('CommunicationPreference', CommunicationPreferenceSchema);
 const NotificationDeliverySchema = new mongoose_1.Schema({

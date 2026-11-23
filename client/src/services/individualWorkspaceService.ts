@@ -18,6 +18,16 @@ export interface IndividualPropertyPerformance {
     yearToDateProfit?: number;
     annualProfit?: number;
   runningBalance: number;
+  reportingCurrency?: string;
+  currencyTotals?: Array<{ currency: string; income: number; expenses: number; net: number }>;
+  unpaidBills?: Array<{ currency: string; amount: number }>;
+  rentCurrencies?: string[];
+  previous?: {
+    monthlyIncome: number;
+    monthlyExpenses: number;
+    netProfit: number;
+    outstandingRent: number;
+  };
   occupancyPercent: number;
   collectionPercent: number;
   profitabilityPercent: number;
@@ -31,7 +41,28 @@ export interface IndividualSummary {
     label: string;
     start?: string | null;
     end?: string | null;
+    timeZone?: string;
+    taxScope?: {
+      kind: 'month' | 'year' | 'unsupported';
+      monthKey: string | null;
+      year: number | null;
+      message: string | null;
+    };
   };
+  account?: { name: string; currency: string; timeZone: string };
+  comparison?: {
+    label: string;
+    monthlyIncome: number;
+    monthlyExpenses: number;
+    netProfit: number;
+    outstandingRent: number;
+  } | null;
+  currencyNotice?: string | null;
+  outstandingRentReliable?: boolean;
+  currencyTotals?: Array<{ currency: string; income: number; expenses: number; net: number }>;
+  unpaidBills?: Array<{ currency: string; amount: number }>;
+  periodSeries?: Array<{ currency: string; points: Array<{ month: string; income: number; expenses: number; net: number }> }>;
+  propertyChoices?: Array<{ propertyId: string; propertyName: string }>;
   summary: {
     totalProperties: number;
     totalTenants: number;
@@ -71,10 +102,38 @@ export interface IndividualEntryPayload {
   supplierVatNumber?: string;
   invoiceNumber?: string;
   inputVatEligibility?: string;
+  paymentStatus?: 'unpaid' | 'paid' | string;
 }
 
 function unwrap<T>(response: any): T {
   return response.data?.data ?? response.data;
+}
+
+export type ReportQuery = {
+  period?: string;
+  start?: string;
+  end?: string;
+  propertyId?: string;
+  category?: string;
+  reportKey?: string;
+  compare?: boolean;
+  series?: boolean;
+  timeZone?: 'account';
+};
+
+export function reportParams(query?: ReportQuery) {
+  if (!query) return undefined;
+  const params: Record<string, string> = {};
+  if (query.period) params.period = query.period;
+  if (query.start) params.start = query.start;
+  if (query.end) params.end = query.end;
+  if (query.propertyId) params.propertyId = query.propertyId;
+  if (query.category) params.category = query.category;
+  if (query.reportKey) params.reportKey = query.reportKey;
+  if (query.compare) params.compare = '1';
+  if (query.series) params.series = '1';
+  if (query.timeZone) params.timeZone = query.timeZone;
+  return params;
 }
 
 function idempotencyKey(prefix: string) {
@@ -82,16 +141,34 @@ function idempotencyKey(prefix: string) {
 }
 
 export const individualWorkspaceService = {
-  async getDashboard(): Promise<IndividualSummary> {
-    return unwrap(await api.get('/individual/dashboard'));
+  async getDashboard(query?: ReportQuery): Promise<IndividualSummary> {
+    return unwrap(await api.get('/individual/dashboard', { params: reportParams(query) }));
   },
 
-  async getAccounting(): Promise<IndividualSummary & { overview: Record<string, number>; topPerformingProperties: IndividualPropertyPerformance[]; worstPerformingProperties: IndividualPropertyPerformance[] }> {
-    return unwrap(await api.get('/individual/accounting'));
+  async getAccounting(query?: ReportQuery): Promise<IndividualSummary & { overview: Record<string, number>; topPerformingProperties: IndividualPropertyPerformance[]; worstPerformingProperties: IndividualPropertyPerformance[] }> {
+    return unwrap(await api.get('/individual/accounting', { params: reportParams(query) }));
   },
 
   async getLedger(propertyId: string) {
     return unwrap(await api.get(`/individual/properties/${propertyId}/ledger`));
+  },
+
+  async getPropertyEditor(propertyId: string) {
+    return unwrap(await api.get(`/individual/properties/${propertyId}/editor`));
+  },
+
+  async updatePropertyEditor(propertyId: string, payload: Record<string, unknown>) {
+    return unwrap<{
+      message?: string;
+      rentNote?: string;
+      chargeNote?: string;
+      currencyNote?: string | null;
+      property?: Record<string, unknown>;
+    }>(await api.put(`/individual/properties/${propertyId}/editor`, payload));
+  },
+
+  async getRecurringCharges() {
+    return unwrap(await api.get('/individual/property-charges'));
   },
 
   async getIncome(params?: { propertyId?: string; month?: string }) {
@@ -134,12 +211,13 @@ export const individualWorkspaceService = {
     return unwrap(await api.post(`/individual/maintenance/${id}/record-expense`, payload, { headers: { 'Idempotency-Key': idempotencyKey(`maintenance:${id}`) } }));
   },
 
-  getReportUrl(reportType: string, format: 'json' | 'csv' | 'excel' | 'pdf' = 'json') {
-    return `/api/individual/reports/${reportType}?format=${encodeURIComponent(format)}`;
+  getReportUrl(reportType: string, format: 'json' | 'csv' | 'excel' | 'pdf' = 'json', query?: ReportQuery) {
+    const params = new URLSearchParams({ ...(reportParams(query) || {}), format });
+    return `/api/individual/reports/${reportType}?${params.toString()}`;
   },
 
-  async getReport(reportType: string) {
-    return unwrap(await api.get(`/individual/reports/${reportType}`));
+  async getReport(reportType: string, query?: ReportQuery) {
+    return unwrap(await api.get(`/individual/reports/${reportType}`, { params: reportParams(query) }));
   },
 
   async getTaxProfile(): Promise<import('../pages/IndividualDashboard/tax/types').OwnerTaxProfile> {
@@ -148,6 +226,26 @@ export const individualWorkspaceService = {
 
   async updateTaxProfile(payload: Record<string, unknown> | object): Promise<import('../pages/IndividualDashboard/tax/types').OwnerTaxProfile> {
     return unwrap(await api.put('/individual/tax-profile', payload));
+  },
+
+  async getTaxEstimate(payload: Record<string, unknown> = {}) {
+    return unwrap(await api.post('/individual/tax/estimate', payload));
+  },
+
+  async getPropertyFinancialOverview(propertyId: string) {
+    return unwrap(await api.get(`/individual/properties/${propertyId}/financial-overview`));
+  },
+
+  async payBill(propertyId: string, transactionId: string) {
+    return unwrap(await api.post(`/individual/bills/${propertyId}/${transactionId}/pay`));
+  },
+
+  async getNotificationPreferences(): Promise<Record<string, { email: boolean; inApp: boolean }>> {
+    return unwrap(await api.get('/individual/notification-preferences'));
+  },
+
+  async saveNotificationPreferences(events: Record<string, { email: boolean; inApp: boolean }>) {
+    return unwrap(await api.put('/individual/notification-preferences', { events }));
   },
 
   async getPropertyTaxProfile(propertyId: string): Promise<import('../pages/IndividualDashboard/tax/types').PropertyTaxProfile> {

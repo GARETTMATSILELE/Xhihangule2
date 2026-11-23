@@ -24,6 +24,8 @@ import {
   isAllowedLegacyCategory,
   normalizeLandlordCategory
 } from './individualAccountingCategories';
+import { deriveExpenseTaxMetadata, isBillCategory, sameObligation, settlementForEntry } from './individualJurisdiction/operations';
+import { NotificationService } from '../ecosystem/services/notificationService';
 
 export type IndividualEntryType = 'income' | 'expense' | 'maintenance';
 
@@ -51,6 +53,7 @@ export type PostIndividualEntryInput = {
   capitalOrRevenue?: CapitalOrRevenue;
   deductibility?: Deductibility;
   inputVatEligibility?: string;
+  paymentStatus?: string;
   sourceMaintenanceId?: string;
   overrideReason?: string;
   idempotencyKey?: string;
@@ -136,6 +139,33 @@ export class IndividualAccountingService {
     if (Number.isNaN(date.getTime())) throw new AppError('Invalid date', 400);
 
     const idempotencyKey = String(input.idempotencyKey || `${input.entryType}:${propertyId}:${Date.now()}`);
+    const currency = String(input.currency || (property as any).operatingCurrency || 'USD').toUpperCase();
+    const settlementStatus = input.entryType === 'income'
+      ? 'NOT_AN_OBLIGATION' as const
+      : settlementForEntry(rawCategory, input.paymentStatus);
+    if (settlementStatus === 'UNSETTLED') {
+      const openBills = await LandlordFinancialTransaction.find({
+        companyId: asObjectId(input.companyId, 'companyId'),
+        propertyId: asObjectId(propertyId, 'propertyId'),
+        status: 'POSTED',
+        settlementStatus: 'UNSETTLED'
+      }).select('propertyId category amount date referenceNumber settlementStatus').lean();
+      const duplicate = openBills.some((row) => sameObligation({
+        propertyId: String(row.propertyId),
+        category: String(row.category),
+        amount: Number(row.amount),
+        date: row.date,
+        reference: row.referenceNumber,
+        settlementStatus: row.settlementStatus
+      }, {
+        propertyId,
+        category: normalizeLandlordCategory(rawCategory, 'EXPENSE'),
+        amount,
+        date,
+        reference: input.reference || input.referenceNumber
+      }));
+      if (duplicate) throw new AppError('An outstanding bill with the same property, category, amount, date and reference already exists', 409);
+    }
     const existing = await LandlordFinancialTransaction.findOne({
       companyId: asObjectId(input.companyId, 'companyId'),
       idempotencyKey
@@ -155,7 +185,8 @@ export class IndividualAccountingService {
     });
     const period = await findPeriodForDate(input.companyId, date);
 
-    const vatMode: LandlordVatMode = input.vatMode || classified.vatModeDefault;
+    const derived = input.entryType === 'income' ? null : deriveExpenseTaxMetadata(rawCategory);
+    const vatMode: LandlordVatMode = input.vatMode || derived?.vatMode || classified.vatModeDefault;
     const sourceKind: LandlordSourceKind = classified.sourceKind;
     const attachments = Array.isArray(input.attachments)
       ? input.attachments
@@ -173,7 +204,7 @@ export class IndividualAccountingService {
         category,
         description: String(input.description || rawCategory),
         amount,
-        currency: input.currency || 'USD',
+        currency,
         date,
         supplier: input.supplier,
         supplierTin: input.supplierTin,
@@ -186,9 +217,10 @@ export class IndividualAccountingService {
         vatMode,
         accountingTreatment: classified.accountingTreatment,
         transactionCategory: classified.transactionCategory,
-        capitalOrRevenue: input.capitalOrRevenue || classified.capitalOrRevenue,
-        deductibility: input.deductibility || classified.deductibility,
-        inputVatEligibility: input.inputVatEligibility,
+        capitalOrRevenue: input.capitalOrRevenue || derived?.capitalOrRevenue || classified.capitalOrRevenue,
+        deductibility: input.deductibility || derived?.deductibility || classified.deductibility,
+        inputVatEligibility: input.inputVatEligibility || derived?.inputVatEligibility,
+        settlementStatus,
         taxReviewStatus: 'UNCLASSIFIED',
         idempotencyKey,
         status: 'POSTED',
@@ -242,6 +274,24 @@ export class IndividualAccountingService {
     );
 
     await this.ensureTaxOverlay(canonical, input);
+
+    if (input.entryType !== 'income') {
+      const eventType = settlementStatus === 'UNSETTLED' && isBillCategory(rawCategory) && /municipal/i.test(rawCategory)
+        ? 'MUNICIPAL_BILL_DUE'
+        : 'EXPENSE_ADDED';
+      NotificationService.notifyEvent({
+        recipientId: input.userId,
+        companyId: input.companyId,
+        eventType,
+        variables: {
+          amount: `${currency} ${amount}`,
+          propertyName: String((property as any).name || 'your property'),
+          description: String(input.description || rawCategory)
+        },
+        idempotencyKey: `${eventType}:${String(canonical._id)}`,
+        operational: true
+      }).catch((error) => logger.warn('Individual owner notification failed after the accounting post', { message: error?.message }));
+    }
 
     await writeAudit({
       companyId: input.companyId,
@@ -471,6 +521,22 @@ export class IndividualAccountingService {
       companyId: asObjectId(companyId, 'companyId'),
       idempotencyKey
     });
+  }
+
+  async settleObligation(companyId: string, propertyAccountTransactionId: string) {
+    const row = await LandlordFinancialTransaction.findOne({
+      companyId: asObjectId(companyId, 'companyId'),
+      propertyAccountTransactionId: asObjectId(propertyAccountTransactionId, 'transactionId'),
+      status: 'POSTED'
+    });
+    if (!row) throw new AppError('Bill not found', 404);
+    if (row.settlementStatus === 'SETTLED') return row;
+    await LandlordFinancialTransaction.updateOne(
+      { _id: row._id },
+      { $set: { settlementStatus: 'SETTLED' } }
+    );
+    row.settlementStatus = 'SETTLED';
+    return row;
   }
 }
 

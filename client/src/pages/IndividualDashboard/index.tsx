@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material';
 import { useCompany } from '../../contexts/CompanyContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -9,18 +9,22 @@ import { getWorkspaceBasePath, isDemoMode } from '../../demo/demoMode';
 import api from '../../api/axios';
 import { Tenants } from '../Tenants/Tenants';
 import { Files } from '../Files/Files';
+import { ChromeProvider } from './components/chrome';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
+import { DASHBOARD_FONT } from './dashboard/presentDashboard';
 import { CenteredLoader } from './components/shared';
 import usePortfolioContext from './hooks/usePortfolioContext';
 import { INDIVIDUAL_THEME } from './theme';
 import DashboardPage from './pages/DashboardPage';
 import PropertiesPage from './pages/PropertiesPage';
 import PropertyDetailPage from './pages/PropertyDetailPage';
+import EditPropertyPage from './pages/EditPropertyPage';
 import RentCollectionPage from './pages/RentCollectionPage';
 import { ExpensesPage, BillsLeviesPage } from './pages/FinancePages';
 import { MaintenancePage, AccountingPage } from './pages/OperationsPages';
 import ReportsPage from './pages/ReportsPage';
+import ReportViewerPage from './reports/ReportViewerPage';
 import VatCentrePage from './pages/VatCentrePage';
 import RentalTaxCentrePage from './pages/RentalTaxCentrePage';
 import IncomeTaxCentrePage from './pages/IncomeTaxCentrePage';
@@ -35,6 +39,7 @@ function IndividualRoutes() {
     <Routes>
       <Route index element={<DashboardPage />} />
       <Route path="properties" element={<PropertiesPage />} />
+      <Route path="properties/:propertyId/edit" element={<EditPropertyPage />} />
       <Route path="properties/:propertyId" element={<PropertyDetailPage />} />
       <Route path="tenants" element={<Tenants />} />
       <Route path="leases" element={<IndividualLeasesPage />} />
@@ -55,6 +60,7 @@ function IndividualRoutes() {
       <Route path="tax/income/reconciliation" element={<IncomeTaxCentrePage />} />
       <Route path="tax/compliance" element={<TaxComplianceCentrePage />} />
       <Route path="reports" element={<ReportsPage />} />
+      <Route path="reports/:reportKey" element={<ReportViewerPage />} />
       <Route path="settings" element={<IndividualSettingsPage />} />
     </Routes>
   );
@@ -62,17 +68,32 @@ function IndividualRoutes() {
 
 function PortfolioShell({ company }: { company: any }) {
   const { actionItems } = usePortfolioContext();
+  const location = useLocation();
+  const [navOpen, setNavOpen] = useState(false);
+  const openNav = useCallback(() => setNavOpen(true), []);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  const base = getWorkspaceBasePath(location.pathname);
+  const isHome = location.pathname === base || location.pathname === `${base}/`;
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: INDIVIDUAL_THEME.background }}>
-      <Sidebar />
-      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-        <TopBar companyName={company?.name} actionItems={actionItems} />
-        <Box sx={{ p: { xs: 2, md: 3 } }}>
-          <IndividualRoutes />
+    <ChromeProvider value={{ openNav, closeNav, navOpen }}>
+      <Box sx={{
+        display: 'flex',
+        minHeight: '100vh',
+        bgcolor: INDIVIDUAL_THEME.background,
+        fontFamily: DASHBOARD_FONT,
+        overflowX: 'hidden',
+        '& .MuiTypography-root, & .MuiButton-root, & .MuiListItemText-primary, & .MuiInputBase-root': { fontFamily: 'inherit' }
+      }}>
+        <Sidebar />
+        <Box sx={{ flexGrow: 1, minWidth: 0, pb: 'env(safe-area-inset-bottom)' }}>
+          {!isHome && <TopBar companyName={company?.name} actionItems={actionItems} />}
+          <Box sx={{ p: { xs: 2, sm: 2.5, lg: 3.5 }, maxWidth: '100%' }}>
+            <IndividualRoutes />
+          </Box>
         </Box>
       </Box>
-    </Box>
+    </ChromeProvider>
   );
 }
 

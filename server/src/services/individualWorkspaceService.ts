@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { toCsv, toPdf } from './individualReportDocument';
 import { Company } from '../models/Company';
 import { Property } from '../models/Property';
 import { Tenant } from '../models/Tenant';
@@ -12,19 +12,29 @@ import individualAccountingService from './individualAccountingService';
 import individualTaxMetadataService from './individualTaxMetadataService';
 import { LandlordFinancialTransaction } from '../models/LandlordFinancialTransaction';
 import { TransactionTaxSnapshot } from '../models/TransactionTaxSnapshot';
-import { sumPropertyAccountPeriodPnl } from './propertyAccountTotals';
-import { daysInRange, resolveReportingPeriod } from './individualReportingPeriod';
+import { sumPendingOperatingBills, sumPropertyAccountPeriodPnl, sumPropertyAccountPeriodPnlByCurrency, sumPropertyAccountPeriodSeries } from './propertyAccountTotals';
+import { daysInRange, formatMonthKey, periodTaxScope, previousReportingPeriod, resolveReportingPeriod } from './individualReportingPeriod';
 import { countsTowardRentReceipt } from './rentalPeriodCoverage';
 
 type EntryType = 'income' | 'expense' | 'maintenance';
 type ReportType =
   | 'property-performance'
+  | 'property-ledger'
   | 'rent-collection'
   | 'expense'
   | 'profit-loss'
   | 'occupancy'
   | 'cashflow'
   | 'tax-preparation';
+
+type SummaryOptions = {
+  start?: string;
+  end?: string;
+  propertyId?: string;
+  timeZone?: 'account';
+  includeComparison?: boolean;
+  includeSeries?: boolean;
+};
 
 const INCOME_CATEGORIES = ['Rent', 'Parking', 'Levy Recovery', 'Utilities Recovery', 'Storage Income', 'Other Income'];
 const EXPENSE_CATEGORIES = ['Maintenance', 'Municipal', 'Levies', 'Security', 'Insurance', 'Gardening', 'Cleaning', 'Repairs', 'Utilities', 'Legal', 'Other'];
@@ -135,47 +145,27 @@ function collectOccupiedPropertyIds(tenants: any[], leases: any[]): Set<string> 
   return occupied;
 }
 
-function toCsv(rows: any[]) {
-  if (!rows.length) return '';
-  const headers = Array.from(rows.reduce((set: Set<string>, row) => {
-    Object.keys(row || {}).forEach((key) => set.add(key));
-    return set;
-  }, new Set<string>())) as string[];
-  const escape = (value: unknown) => {
-    const text = value === null || value === undefined ? '' : String(value);
-    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
-  return [
-    headers.join(','),
-    ...rows.map((row) => headers.map((header) => escape(row?.[header])).join(','))
-  ].join('\n');
+function withinPeriod(value: unknown, start?: Date, end?: Date) {
+  const date = new Date(value as any);
+  if (Number.isNaN(date.getTime())) return false;
+  if (start && date < start) return false;
+  if (end && date >= end) return false;
+  return true;
 }
 
-async function toPdf(title: string, rows: any[]) {
-  const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  let page = pdf.addPage([595, 842]);
-  let y = 800;
-  page.drawText(title, { x: 40, y, size: 16, font: bold });
-  y -= 28;
-  page.drawText(`Generated ${new Date().toLocaleString()}`, { x: 40, y, size: 9, font });
-  y -= 24;
+function isMaintenanceEntry(entry: any) {
+  const category = String(entry?.category || '').toLowerCase();
+  const type = String(entry?.type || '').toLowerCase();
+  const transactionCategory = String(entry?.transactionCategory || '').toUpperCase();
+  return category.includes('maintenance') || type === 'maintenance' || type === 'repair' || transactionCategory === 'MAINTENANCE';
+}
 
-  const lines = rows.length
-    ? rows.flatMap((row) => Object.entries(row).map(([key, value]) => `${key}: ${value ?? ''}`).concat(''))
-    : ['No data'];
-
-  for (const line of lines) {
-    if (y < 40) {
-      page = pdf.addPage([595, 842]);
-      y = 800;
-    }
-    page.drawText(String(line).slice(0, 110), { x: 40, y, size: 9, font });
-    y -= 14;
-  }
-
-  return Buffer.from(await pdf.save());
+function mergeCurrencyAmounts(lists: Array<Array<{ currency: string; amount: number }>>) {
+  const totals = new Map<string, number>();
+  lists.forEach((list) => {
+    list.forEach((row) => totals.set(row.currency, (totals.get(row.currency) || 0) + Number(row.amount || 0)));
+  });
+  return Array.from(totals.entries()).map(([currency, amount]) => ({ currency, amount: Number(amount.toFixed(2)) }));
 }
 
 export class IndividualWorkspaceService {
@@ -189,6 +179,10 @@ export class IndividualWorkspaceService {
   }
 
   private async getCompanyProperties(companyId: string) {
+    const properties = await Property.find({ companyId: asObjectId(companyId), isDeleted: { $ne: true } }).sort({ name: 1 }).lean();
+    const { applyDueRentChanges } = await import('./individualPropertyEditService');
+    const applied = await applyDueRentChanges(properties as any[]);
+    if (!applied) return properties;
     return Property.find({ companyId: asObjectId(companyId), isDeleted: { $ne: true } }).sort({ name: 1 }).lean();
   }
 
@@ -230,7 +224,8 @@ export class IndividualWorkspaceService {
     periodEnd?: Date,
     yearStart?: Date,
     yearEnd?: Date,
-    periodDays = 30
+    periodDays = 30,
+    breakdown?: { currency: string }
   ) {
     const { property, account } = row;
     const units = Math.max(1, Number(property.units || 1));
@@ -249,6 +244,12 @@ export class IndividualWorkspaceService {
     const collectionPercent = expectedRent > 0 ? Math.min(100, Math.round((collectedRent / expectedRent) * 100)) : 100;
     const expenseRatio = monthlyIncome > 0 ? Math.round((monthlyExpenses / monthlyIncome) * 100) : 0;
     const profitabilityPercent = monthlyIncome > 0 ? Math.round((netProfit / monthlyIncome) * 100) : 0;
+    const currencyBuckets = breakdown
+      ? sumPropertyAccountPeriodPnlByCurrency(account.transactions, periodStart, periodEnd, breakdown.currency)
+      : [];
+    const unpaidBills = breakdown
+      ? sumPendingOperatingBills(account.transactions, periodStart, periodEnd, breakdown.currency)
+      : [];
     return {
       propertyId: String(property._id),
       propertyName: property.name,
@@ -278,35 +279,80 @@ export class IndividualWorkspaceService {
       collectionPercent,
       profitabilityPercent,
       expenseRatio,
-      maintenanceDue: property.status === 'maintenance' || property.propertyOperationalStatus === 'Under Maintenance'
+      maintenanceDue: property.status === 'maintenance' || property.propertyOperationalStatus === 'Under Maintenance',
+      ...(breakdown ? {
+        reportingCurrency: currencyBuckets.length === 1 ? currencyBuckets[0].currency : breakdown.currency,
+        currencyTotals: currencyBuckets.length > 1 ? currencyBuckets : undefined,
+        unpaidBills
+      } : {})
     };
   }
 
-  async getSummary(companyId: string, periodBasis?: string) {
-    const period = resolveReportingPeriod(periodBasis);
-    const ytd = resolveReportingPeriod('year_to_date');
+  private async accountPreferences(companyId: string) {
+    const company = await Company.findById(companyId).select('name workspacePreferences').lean();
+    const preferences = (company as any)?.workspacePreferences || {};
+    return {
+      name: String((company as any)?.name || 'Property owner'),
+      currency: String(preferences.currency || 'USD'),
+      timeZone: String(preferences.timezone || 'Africa/Harare')
+    };
+  }
+
+  async getSummary(companyId: string, periodBasis?: string, options?: SummaryOptions) {
+    const prefs = options ? await this.accountPreferences(companyId) : { name: '', currency: 'USD', timeZone: 'UTC' };
+    const zone = options?.timeZone === 'account' ? prefs.timeZone : 'UTC';
+    let period;
+    try {
+      period = options
+        ? resolveReportingPeriod(periodBasis, new Date(), { start: options.start, end: options.end, timeZone: zone })
+        : resolveReportingPeriod(periodBasis);
+    } catch (error: any) {
+      if (error?.message === 'CUSTOM_PERIOD_REQUIRED') throw new AppError('Choose a start and end date', 400);
+      if (error?.message === 'CUSTOM_PERIOD_INVALID') throw new AppError('The end date must be on or after the start date', 400);
+      throw error;
+    }
+    const ytd = options
+      ? resolveReportingPeriod('year_to_date', new Date(), { timeZone: zone })
+      : resolveReportingPeriod('year_to_date');
     const periodDays = daysInRange(period.start, period.end) || 30;
-    const [properties, tenants, leases, payments, maintenance] = await Promise.all([
+    const [propertiesAll, tenants, leases, payments, maintenance] = await Promise.all([
       this.getCompanyProperties(companyId),
       Tenant.find({ companyId: asObjectId(companyId) }).lean(),
       Lease.find({ companyId: asObjectId(companyId), status: { $in: ['active', 'expiring_soon'] } }).lean(),
       Payment.find({ companyId: asObjectId(companyId), status: { $in: ['completed', 'paid', 'success'] } as any }).sort({ paymentDate: -1 }).limit(200).lean(),
       MaintenanceRequest.find({ companyId: asObjectId(companyId) }).sort({ updatedAt: -1 }).limit(50).lean()
     ]);
+    if (options?.propertyId && !mongoose.Types.ObjectId.isValid(options.propertyId)) {
+      throw new AppError('Choose a valid property', 400);
+    }
+    const properties = options?.propertyId
+      ? propertiesAll.filter((property) => String(property._id) === options.propertyId)
+      : propertiesAll;
     const rows = await this.getAccounts(properties);
-    const collectStart = period.start || new Date(0);
-    const collectEnd = period.end || new Date();
+    const allowedIds = new Set(properties.map((property) => String(property._id)));
+    const collectRent = (start?: Date, end?: Date) => {
+      const amounts = new Map<string, number>();
+      const currencies = new Map<string, Set<string>>();
+      const windowStart = start || new Date(0);
+      const windowEnd = end || new Date();
+      for (const payment of payments) {
+        if (!countsTowardRentReceipt(payment as any)) continue;
+        const pid = String((payment as any).propertyId || '');
+        if (!allowedIds.has(pid)) continue;
+        const date = new Date((payment as any).paymentDate || (payment as any).createdAt);
+        if (date >= windowStart && date < windowEnd) {
+          amounts.set(pid, (amounts.get(pid) || 0) + Number((payment as any).amount || 0));
+          const code = String((payment as any).currency || prefs.currency || 'USD');
+          if (!currencies.has(pid)) currencies.set(pid, new Set());
+          currencies.get(pid)!.add(code);
+        }
+      }
+      return { amounts, currencies };
+    };
+    const collected = collectRent(period.start, period.end);
+    const collectedThisMonth = collected.amounts;
     const activeLeaseCountByProperty = new Map<string, number>();
     for (const lease of leases) activeLeaseCountByProperty.set(String(lease.propertyId), (activeLeaseCountByProperty.get(String(lease.propertyId)) || 0) + 1);
-    const collectedThisMonth = new Map<string, number>();
-    for (const payment of payments) {
-      if (!countsTowardRentReceipt(payment as any)) continue;
-      const date = new Date((payment as any).paymentDate || (payment as any).createdAt);
-      if (date >= collectStart && date < collectEnd) {
-        const pid = String((payment as any).propertyId || '');
-        collectedThisMonth.set(pid, (collectedThisMonth.get(pid) || 0) + Number((payment as any).amount || 0));
-      }
-    }
     const occupiedPropertyIds = collectOccupiedPropertyIds(tenants, leases);
     const propertyMetrics = rows.map((row) => this.propertyMetrics(
       row,
@@ -317,8 +363,55 @@ export class IndividualWorkspaceService {
       period.end,
       ytd.start,
       ytd.end,
-      periodDays
+      periodDays,
+      options ? { currency: prefs.currency } : undefined
     ));
+    if (options) {
+      propertyMetrics.forEach((metric) => {
+        const codes = Array.from(collected.currencies.get(metric.propertyId) || []);
+        if (codes.length > 1) (metric as any).rentCurrencies = codes;
+      });
+    }
+    let comparison: { label: string; monthlyIncome: number; monthlyExpenses: number; netProfit: number; outstandingRent: number } | null = null;
+    if (options?.includeComparison) {
+      const previous = previousReportingPeriod(period, zone);
+      if (previous?.start && previous?.end) {
+        const previousCollected = collectRent(previous.start, previous.end);
+        const previousMetrics = rows.map((row) => this.propertyMetrics(
+          row,
+          activeLeaseCountByProperty,
+          previousCollected.amounts,
+          occupiedPropertyIds,
+          previous.start,
+          previous.end,
+          ytd.start,
+          ytd.end,
+          daysInRange(previous.start, previous.end) || 30
+        ));
+        const previousById = new Map(previousMetrics.map((metric) => [metric.propertyId, metric]));
+        propertyMetrics.forEach((metric) => {
+          const prior = previousById.get(metric.propertyId);
+          if (!prior) return;
+          (metric as any).previous = {
+            monthlyIncome: prior.monthlyIncome,
+            monthlyExpenses: prior.monthlyExpenses,
+            netProfit: prior.netProfit,
+            outstandingRent: prior.outstandingRent
+          };
+        });
+        const previousIncome = previousMetrics.reduce((sum, metric) => sum + metric.monthlyIncome, 0);
+        const previousExpenses = previousMetrics.reduce((sum, metric) => sum + metric.monthlyExpenses, 0);
+        const previousExpected = previousMetrics.reduce((sum, metric) => sum + metric.expectedRent, 0);
+        const previousCollectedRent = previousMetrics.reduce((sum, metric) => sum + metric.collectedRent, 0);
+        comparison = {
+          label: previous.label,
+          monthlyIncome: previousIncome,
+          monthlyExpenses: previousExpenses,
+          netProfit: previousIncome - previousExpenses,
+          outstandingRent: Math.max(0, previousExpected - previousCollectedRent)
+        };
+      }
+    }
     const monthlyIncome = propertyMetrics.reduce((sum, p) => sum + p.monthlyIncome, 0);
     const monthlyExpenses = propertyMetrics.reduce((sum, p) => sum + p.monthlyExpenses, 0);
     const yearToDateProfit = propertyMetrics.reduce((sum, p) => sum + p.yearToDateProfit, 0);
@@ -363,12 +456,37 @@ export class IndividualWorkspaceService {
       }))
     ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()).slice(0, 20);
 
-    return {
+    const rentCurrencies = new Set<string>();
+    collected.currencies.forEach((codes) => codes.forEach((code) => rentCurrencies.add(code)));
+    const currencyBuckets = new Map<string, { income: number; expenses: number }>();
+    propertyMetrics.forEach((metric: any) => {
+      const buckets = metric.currencyTotals?.length
+        ? metric.currencyTotals
+        : [{ currency: metric.reportingCurrency || prefs.currency, income: metric.monthlyIncome, expenses: metric.monthlyExpenses }];
+      buckets.forEach((bucket: any) => {
+        const current = currencyBuckets.get(bucket.currency) || { income: 0, expenses: 0 };
+        current.income += Number(bucket.income || 0);
+        current.expenses += Number(bucket.expenses || 0);
+        currencyBuckets.set(bucket.currency, current);
+      });
+    });
+    const currencyTotals = Array.from(currencyBuckets.entries()).map(([currency, bucket]) => ({
+      currency,
+      income: Number(bucket.income.toFixed(2)),
+      expenses: Number(bucket.expenses.toFixed(2)),
+      net: Number((bucket.income - bucket.expenses).toFixed(2))
+    }));
+    const notices: string[] = [];
+    if (currencyTotals.length > 1) notices.push('Income and expenses are shown separately by currency. They are not converted or added together.');
+    if (rentCurrencies.size > 1) notices.push('Rent receipts in this period use more than one currency, so outstanding rent is not shown as one total.');
+
+    const result: any = {
       period: {
         basis: period.basis,
         label: period.label,
         start: period.start?.toISOString() || null,
-        end: period.end?.toISOString() || null
+        end: period.end?.toISOString() || null,
+        ...(options ? { timeZone: zone, taxScope: periodTaxScope(period, zone) } : {})
       },
       summary: {
         totalProperties: properties.length,
@@ -397,10 +515,24 @@ export class IndividualWorkspaceService {
       properties: propertyMetrics,
       recentActivity
     };
+    if (options) {
+      const allTransactions = rows.flatMap((row) => row.account.transactions || []);
+      result.account = { name: prefs.name, currency: prefs.currency, timeZone: prefs.timeZone };
+      result.propertyChoices = propertiesAll.map((property) => ({ propertyId: String(property._id), propertyName: property.name }));
+      result.comparison = comparison;
+      result.currencyNotice = notices[0] || null;
+      result.outstandingRentReliable = rentCurrencies.size <= 1;
+      result.currencyTotals = currencyTotals.length > 1 ? currencyTotals : undefined;
+      result.unpaidBills = mergeCurrencyAmounts(propertyMetrics.map((metric: any) => metric.unpaidBills || []));
+      result.periodSeries = options.includeSeries
+        ? sumPropertyAccountPeriodSeries(allTransactions, period.start, period.end, (date) => formatMonthKey(date, zone), prefs.currency)
+        : undefined;
+    }
+    return result;
   }
 
-  async getAccounting(companyId: string, periodBasis?: string) {
-    const data = await this.getSummary(companyId, periodBasis);
+  async getAccounting(companyId: string, periodBasis?: string, options?: SummaryOptions) {
+    const data = await this.getSummary(companyId, periodBasis, options);
     const properties = [...data.properties].sort((a, b) => b.netProfit - a.netProfit);
     return {
       ...data,
@@ -462,7 +594,7 @@ export class IndividualWorkspaceService {
           companyId: asObjectId(companyId),
           propertyAccountTransactionId: { $in: paIds }
         })
-          .select('_id propertyAccountTransactionId taxPeriodKey taxCalculationStatus deductibility capitalOrRevenue')
+          .select('_id propertyAccountTransactionId taxPeriodKey taxCalculationStatus deductibility capitalOrRevenue settlementStatus currency')
           .lean()
       : [];
     const snapshots = canonical.length
@@ -491,6 +623,8 @@ export class IndividualWorkspaceService {
           taxTypesRelevant: snap?.taxTypesRelevant || [],
           deductibility: lft?.deductibility || tx.deductibility || null,
           capitalOrRevenue: lft?.capitalOrRevenue || tx.capitalOrRevenue || null,
+          obligationStatus: lft?.settlementStatus || null,
+          currency: lft?.currency || tx.currency || null,
           taxAmount: null,
           vatAmount: null
         };
@@ -530,6 +664,7 @@ export class IndividualWorkspaceService {
       capitalOrRevenue: body.capitalOrRevenue,
       deductibility: body.deductibility,
       inputVatEligibility: body.inputVatEligibility,
+      paymentStatus: body.paymentStatus,
       sourceMaintenanceId: body.sourceMaintenanceId || body.maintenanceId,
       overrideReason: body.overrideReason,
       idempotencyKey: idempotencyKey || body.idempotencyKey
@@ -624,8 +759,26 @@ export class IndividualWorkspaceService {
     taxTreatment?: string;
     taxCalculationStatus?: string;
     taxType?: string;
+    period?: string;
+    start?: string;
+    end?: string;
+    propertyId?: string;
+    category?: string;
+    timeZone?: 'account';
+    reportKey?: string;
   } = {}) {
-    const data = await this.getAccounting(companyId);
+    const shaped = Boolean(filters.period || filters.start || filters.end || filters.propertyId || filters.timeZone || filters.category);
+    const data = await this.getAccounting(
+      companyId,
+      shaped ? (filters.period || 'this_month') : undefined,
+      shaped ? {
+        start: filters.start,
+        end: filters.end,
+        propertyId: filters.propertyId,
+        timeZone: filters.timeZone === 'account' ? 'account' : undefined,
+        includeSeries: true
+      } : undefined
+    );
     const taxFilters = {
       taxPeriodId: filters.taxPeriodId,
       taxPeriodKey: filters.taxPeriodKey,
@@ -633,53 +786,162 @@ export class IndividualWorkspaceService {
       taxCalculationStatus: filters.taxCalculationStatus,
       taxType: filters.taxType
     };
+    const accountCurrency = data.account?.currency || 'USD';
+    const applyDates = Boolean(filters.period || filters.start || filters.end);
+    const periodStart = applyDates && data.period.start ? new Date(data.period.start) : undefined;
+    const periodEnd = applyDates && data.period.end ? new Date(data.period.end) : undefined;
+    const performanceRow = (property: any) => {
+      if (property.currencyTotals?.length > 1) {
+        return property.currencyTotals.map((bucket: any) => ({
+          property: property.propertyName,
+          currency: bucket.currency,
+          income: bucket.income,
+          expenses: bucket.expenses,
+          netProfit: bucket.net
+        }));
+      }
+      const row: any = {
+        property: property.propertyName,
+        income: property.monthlyIncome,
+        expenses: property.monthlyExpenses,
+        netProfit: property.netProfit,
+        yearToDateProfit: property.yearToDateProfit,
+        annualisedRunRate: property.annualisedRunRate,
+        expenseRatio: property.expenseRatio,
+        profitabilityPercent: property.profitabilityPercent
+      };
+      if (shaped) row.currency = property.reportingCurrency || accountCurrency;
+      return [row];
+    };
     let rows: any[];
+    let note = '';
     switch (reportType) {
       case 'rent-collection':
-        rows = data.properties.map((p) => ({
-          property: p.propertyName,
-          expectedRent: p.expectedRent,
-          collectedRent: p.collectedRent,
-          outstandingRent: p.outstandingRent,
-          collectionPercent: p.collectionPercent,
-          status: p.rentCollectionStatus
-        }));
+        rows = data.properties.map((property: any) => {
+          const row: any = {
+            property: property.propertyName,
+            expectedRent: property.expectedRent,
+            collectedRent: property.collectedRent,
+            outstandingRent: property.rentCurrencies?.length ? null : property.outstandingRent,
+            collectionPercent: property.collectionPercent,
+            status: property.rentCollectionStatus
+          };
+          if (shaped) row.currency = property.reportingCurrency || accountCurrency;
+          if (property.rentCurrencies?.length) row.currencies = property.rentCurrencies.join(', ');
+          return row;
+        });
+        if (filters.reportKey === 'tenant-ledger') {
+          note = 'Rent is reported by property. A line-by-line tenant statement is not produced by the reporting service.';
+        }
         break;
-      case 'expense':
-        rows = await this.listEntries(companyId, 'expense', taxFilters);
+      case 'expense': {
+        const entries = await this.listEntries(companyId, 'expense', { ...taxFilters, propertyId: filters.propertyId });
+        rows = entries
+          .filter((entry: any) => !applyDates || withinPeriod(entry.date || entry.createdAt, periodStart, periodEnd))
+          .filter((entry: any) => filters.category !== 'Maintenance' || isMaintenanceEntry(entry))
+          .map((entry: any) => ({
+            date: entry.date || entry.createdAt,
+            property: entry.propertyName || '',
+            category: entry.category || entry.type || '',
+            description: entry.description || '',
+            amount: Number(entry.amount || 0),
+            currency: entry.currency || accountCurrency,
+            reference: entry.referenceNumber || entry.reference || '',
+            status: entry.status || ''
+          }));
         break;
+      }
+      case 'property-ledger': {
+        const properties = filters.propertyId
+          ? (await this.getCompanyProperties(companyId)).filter((property) => String(property._id) === filters.propertyId)
+          : await this.getCompanyProperties(companyId);
+        const accounts = await this.getAccounts(properties);
+        rows = accounts.flatMap(({ property, account }) => buildRunningLedger(account.transactions || [])
+          .filter((entry: any) => !applyDates || withinPeriod(entry.date || entry.createdAt, periodStart, periodEnd))
+          .map((entry: any) => ({
+            date: entry.date || entry.createdAt,
+            property: property.name,
+            entry: entry.type,
+            category: entry.category || '',
+            description: entry.description || '',
+            amount: txSignedAmount(entry),
+            balance: Number(entry.runningBalance || 0),
+            reference: entry.referenceNumber || ''
+          })));
+        note = 'The balance is the running ledger balance and includes activity from before this period.';
+        break;
+      }
       case 'profit-loss':
       case 'cashflow':
       case 'tax-preparation':
       case 'property-performance':
-        rows = data.properties.map((p) => ({
-          property: p.propertyName,
-          income: p.monthlyIncome,
-          expenses: p.monthlyExpenses,
-          netProfit: p.netProfit,
-          yearToDateProfit: p.yearToDateProfit,
-          annualisedRunRate: p.annualisedRunRate,
-          expenseRatio: p.expenseRatio,
-          profitabilityPercent: p.profitabilityPercent
-        }));
+        rows = data.properties.flatMap((property: any) => performanceRow(property));
+        if (reportType === 'cashflow') note = 'Income and operating expenses recorded on the property ledger. This is not a bank reconciliation.';
+        if (reportType === 'tax-preparation') note = 'Property result for the selected period. This is not a tax assessment.';
         break;
       case 'occupancy':
-        rows = data.properties.map((p) => ({
-          property: p.propertyName,
-          units: p.units,
-          occupiedUnits: p.occupiedUnits,
-          vacantUnits: p.vacantUnits,
-          occupancyPercent: p.occupancyPercent
+        rows = data.properties.map((property: any) => ({
+          property: property.propertyName,
+          units: property.units,
+          occupiedUnits: property.occupiedUnits,
+          vacantUnits: property.vacantUnits,
+          occupancyPercent: property.occupancyPercent
         }));
         break;
       default:
         rows = data.properties;
     }
 
+    const titles: Record<string, string> = {
+      'profit-loss': 'Profit & Loss',
+      'income-statement': 'Income Statement',
+      cashflow: 'Cashflow',
+      'expense-summary': 'Expense Summary',
+      'property-performance': 'Property Performance',
+      'property-ledger': 'Property Ledger',
+      occupancy: 'Occupancy Report',
+      'maintenance-summary': 'Maintenance Summary',
+      'rent-collection': 'Rent Collection',
+      'tenant-ledger': 'Rent by Property',
+      'tax-preparation': 'Tax Summary',
+      'tax-summary': 'Tax Summary'
+    };
+    const title = (filters.reportKey && titles[filters.reportKey]) || titles[reportType] || 'Report';
+    const generatedAt = new Date().toISOString();
+    const propertyName = filters.propertyId ? (data.properties[0]?.propertyName || 'Selected property') : 'All properties';
+    const body = {
+      reportType,
+      reportKey: filters.reportKey || reportType,
+      title,
+      rows,
+      filters: {
+        ...taxFilters,
+        period: data.period.basis,
+        propertyId: filters.propertyId || null,
+        category: filters.category || null
+      },
+      generatedAt,
+      period: data.period,
+      account: data.account || null,
+      propertyName,
+      currency: data.currencyTotals?.length > 1 ? null : (data.account?.currency || null),
+      currencyNotice: data.currencyNotice || null,
+      series: data.periodSeries || [],
+      note: note || null
+    };
+
     if (format === 'pdf') {
       return {
         contentType: 'application/pdf',
-        body: await toPdf(reportType, rows)
+        body: await toPdf({
+          title,
+          ownerName: data.account?.name,
+          periodLabel: data.period.label,
+          propertyName,
+          currency: body.currency || undefined,
+          generatedAt: generatedAt.slice(0, 10),
+          note: note || data.currencyNotice || undefined
+        }, rows)
       };
     }
     if (format === 'csv' || format === 'excel') {
@@ -688,7 +950,47 @@ export class IndividualWorkspaceService {
         body: toCsv(rows)
       };
     }
-    return { contentType: 'application/json', body: { reportType, rows, filters: taxFilters, generatedAt: new Date().toISOString() } };
+    return { contentType: 'application/json', body };
+  }
+
+  async getPropertyFinancialOverview(companyId: string, propertyId: string) {
+    const { buildPropertyFinancialOverview } = await import('./individualJurisdiction/operations');
+    const property = await Property.findOne({
+      _id: asObjectId(propertyId),
+      companyId: asObjectId(companyId),
+      isDeleted: { $ne: true }
+    }).lean();
+    if (!property) throw new AppError('Property not found', 404);
+    const now = new Date();
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const payments = await Payment.find({
+      companyId: asObjectId(companyId),
+      propertyId: asObjectId(propertyId),
+      status: { $in: ['completed', 'paid', 'success'] } as any
+    }).lean();
+    let rentCollected = 0;
+    for (const payment of payments) {
+      if (!countsTowardRentReceipt(payment as any)) continue;
+      const date = new Date((payment as any).paymentDate || (payment as any).createdAt);
+      if (date >= periodStart && date < periodEnd) rentCollected += Number((payment as any).amount || 0);
+    }
+    const expenses = await this.listEntries(companyId, 'expense', { propertyId });
+    return buildPropertyFinancialOverview({
+      currency: String((property as any).operatingCurrency || 'USD'),
+      monthlyRent: Number((property as any).rent || 0),
+      rentCollected,
+      transactions: (Array.isArray(expenses) ? expenses : []).map((row: any) => ({
+        type: row.type,
+        category: row.category,
+        amount: Number(row.amount || 0),
+        currency: row.currency,
+        date: row.date,
+        obligationStatus: row.obligationStatus
+      })),
+      periodStart,
+      periodEnd
+    });
   }
 }
 

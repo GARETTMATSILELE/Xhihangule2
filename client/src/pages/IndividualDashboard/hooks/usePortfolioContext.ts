@@ -44,7 +44,7 @@ export function usePortfolioContext() {
         setMaintenance(DEMO_MAINTENANCE);
         setInspections(DEMO_INSPECTIONS);
         setBills(DEMO_EXPENSES.filter((e) =>
-          billCategories.includes(e.category as any) || ['Municipal', 'Levies', 'Insurance', 'Utilities'].includes(String(e.category))
+          billCategories.includes(e.category as any) || ['Municipal', 'Municipal Rates', 'Levies', 'Insurance', 'Utilities'].includes(String(e.category))
         ));
         return;
       }
@@ -60,9 +60,8 @@ export function usePortfolioContext() {
       const maintList = Array.isArray(maintRes.data) ? maintRes.data : maintRes.data?.data || [];
       setMaintenance(maintList);
       setInspections(Array.isArray(inspRes) ? inspRes : []);
-      const billRows = (Array.isArray(expenseRows) ? expenseRows : []).filter((e: any) =>
-        billCategories.includes(e.category) || ['Municipal', 'Levies', 'Insurance', 'Utilities'].includes(String(e.category))
-      );
+      const billKeys = ['Municipal', 'Municipal Rates', 'MUNICIPAL_RATES', 'MUNICIPAL', 'Levies', 'LEVIES', 'Insurance', 'INSURANCE', 'Utilities', 'UTILITIES'];
+      const billRows = (Array.isArray(expenseRows) ? expenseRows : []).filter((e: any) => billKeys.includes(String(e.category)));
       setBills(billRows);
     } finally {
       setAuxLoading(false);
@@ -101,16 +100,18 @@ export function usePortfolioContext() {
     return map;
   }, [maintenance]);
 
+  const billIsOutstanding = (bill: any) => {
+    if (bill.obligationStatus) return bill.obligationStatus === 'UNSETTLED';
+    const status = String(bill.status || 'completed').toLowerCase();
+    return status !== 'paid' && status !== 'completed';
+  };
+
   const outstandingBillsByProperty = useMemo(() => {
     const map = new Map<string, number>();
-    const now = new Date();
     for (const bill of bills) {
-      const status = String(bill.status || 'completed').toLowerCase();
-      const due = bill.date ? new Date(bill.date) : null;
-      if (status !== 'paid' && status !== 'completed' && due && due < now) {
-        const pid = String(bill.propertyId || '');
-        map.set(pid, (map.get(pid) || 0) + Number(bill.amount || 0));
-      }
+      if (!billIsOutstanding(bill)) continue;
+      const pid = String(bill.propertyId || '');
+      map.set(pid, (map.get(pid) || 0) + Number(bill.amount || 0));
     }
     return map;
   }, [bills]);
@@ -162,11 +163,7 @@ export function usePortfolioContext() {
   );
 
   const outstandingBillsTotal = useMemo(
-    () => bills.reduce((sum, b) => {
-      const status = String(b.status || 'completed').toLowerCase();
-      if (status === 'paid' || status === 'completed') return sum;
-      return sum + Number(b.amount || 0);
-    }, 0),
+    () => bills.reduce((sum, b) => (billIsOutstanding(b) ? sum + Number(b.amount || 0) : sum), 0),
     [bills]
   );
 
@@ -176,8 +173,7 @@ export function usePortfolioContext() {
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     return bills.filter((b) => {
       const d = b.date ? new Date(b.date) : null;
-      const status = String(b.status || 'completed').toLowerCase();
-      return d && d >= start && d < end && status !== 'paid' && status !== 'completed';
+      return d && d >= start && d < end && billIsOutstanding(b);
     }).length;
   }, [bills]);
 

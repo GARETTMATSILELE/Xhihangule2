@@ -12,6 +12,7 @@ import {
 import {
   AttachMoney,
   Build,
+  Edit,
   Folder,
   TrendingDown,
   Visibility
@@ -86,6 +87,7 @@ export function PropertyCard({ property, onView }: { property: EnrichedProperty;
 
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
             <Button size="small" startIcon={<Visibility />} onClick={onView}>View</Button>
+            <Button size="small" startIcon={<Edit />} component={RouterLink} to={workspacePath(`/individual-dashboard/properties/${property.propertyId}/edit`)}>Edit</Button>
             <Button size="small" startIcon={<AttachMoney />} component={RouterLink} to={workspacePath(`/individual-dashboard/rent-collection?propertyId=${property.propertyId}`)}>Record Rent</Button>
             <Button size="small" startIcon={<TrendingDown />} component={RouterLink} to={workspacePath(`/individual-dashboard/expenses?propertyId=${property.propertyId}`)}>Add Expense</Button>
             <Button size="small" startIcon={<Build />} component={RouterLink} to={workspacePath('/individual-dashboard/maintenance')}>Maintenance</Button>

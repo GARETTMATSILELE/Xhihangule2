@@ -23,6 +23,8 @@ exports.LEGACY_EXPENSE_CATEGORIES = [
     'Repairs',
     'Utilities',
     'Legal',
+    'Municipal Rates',
+    'Property Management',
     'Other'
 ];
 exports.CANONICAL_INCOME_CATEGORIES = [
@@ -84,6 +86,8 @@ const LEGACY_EXPENSE_MAP = {
     Repairs: 'REPAIRS',
     Utilities: 'UTILITIES',
     Legal: 'LEGAL',
+    'Municipal Rates': 'MUNICIPAL_RATES',
+    'Property Management': 'PROPERTY_MANAGEMENT',
     Other: 'OTHER_PROPERTY_EXPENSE'
 };
 function normalizeLandlordCategory(raw, fallbackKind) {

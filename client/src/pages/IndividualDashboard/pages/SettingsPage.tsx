@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Box,
@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   Stack,
+  Switch,
   Tab,
   Tabs,
   TextField,
@@ -13,8 +14,9 @@ import {
 } from '@mui/material';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useFeature } from '../../../contexts/FeatureFlags';
+import individualWorkspaceService from '../../../services/individualWorkspaceService';
 import { PageShell } from '../components/shared';
-import { TaxProfileForm } from '../components/TaxProfileForm';
+import { JurisdictionSettings } from '../components/JurisdictionSettings';
 import { INDIVIDUAL_THEME } from '../theme';
 
 function ProfileTab() {
@@ -40,16 +42,54 @@ function SecurityTab() {
   );
 }
 
+const NOTIFICATION_EVENTS = [
+  ['RENT_PAID', 'Rent Paid'],
+  ['RENT_OVERDUE', 'Rent Overdue'],
+  ['LEASE_EXPIRING', 'Lease Expiring'],
+  ['INSPECTION_DUE', 'Inspection Due'],
+  ['MAINTENANCE_COMPLETED', 'Maintenance Completed'],
+  ['MUNICIPAL_BILL_DUE', 'Municipal Bill Due'],
+  ['EXPENSE_ADDED', 'Expense Added'],
+  ['TENANT_ADDED', 'Tenant Added']
+] as const;
+
 function NotificationsTab() {
-  const events = ['Rent Paid', 'Rent Overdue', 'Lease Expiring', 'Inspection Due', 'Maintenance Completed', 'Municipal Bill Due', 'Expense Added', 'Tenant Added'];
+  const [events, setEvents] = useState<Record<string, { email: boolean; inApp: boolean }>>({});
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    individualWorkspaceService.getNotificationPreferences()
+      .then((data) => setEvents((data || {}) as Record<string, { email: boolean; inApp: boolean }>))
+      .catch(() => undefined);
+  }, []);
+
+  const toggle = (key: string, channel: 'email' | 'inApp') => {
+    setSaved(false);
+    setEvents((prev) => ({
+      ...prev,
+      [key]: { email: prev[key]?.email !== false, inApp: prev[key]?.inApp !== false, [channel]: !(prev[key]?.[channel] !== false) }
+    }));
+  };
+
   return (
     <Stack spacing={1}>
-      {events.map((e) => (
-        <Box key={e} sx={{ display: 'flex', justifyContent: 'space-between', py: 1, borderBottom: `1px solid ${INDIVIDUAL_THEME.border}` }}>
-          <Typography>{e}</Typography>
-          <Typography variant="body2" color="text.secondary">Enabled</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: 1, pb: 1 }}>
+        <Typography variant="caption" color="text.secondary">Event</Typography>
+        <Typography variant="caption" color="text.secondary">Email</Typography>
+        <Typography variant="caption" color="text.secondary">In-app</Typography>
+      </Box>
+      {NOTIFICATION_EVENTS.map(([key, label]) => (
+        <Box key={key} sx={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', alignItems: 'center', borderBottom: `1px solid ${INDIVIDUAL_THEME.border}` }}>
+          <Typography>{label}</Typography>
+          <Switch checked={events[key]?.email !== false} onChange={() => toggle(key, 'email')} />
+          <Switch checked={events[key]?.inApp !== false} onChange={() => toggle(key, 'inApp')} />
         </Box>
       ))}
+      <Button variant="contained" sx={{ bgcolor: INDIVIDUAL_THEME.primary, alignSelf: 'flex-start' }} onClick={async () => {
+        await individualWorkspaceService.saveNotificationPreferences(events);
+        setSaved(true);
+      }}>Save notifications</Button>
+      {saved && <Alert severity="success">Notification preferences saved on your account.</Alert>}
     </Stack>
   );
 }
@@ -60,10 +100,8 @@ function BillingTab() {
 
 function PreferencesTab() {
   return (
-    <Stack spacing={2} sx={{ maxWidth: 480 }}>
-      <TextField select label="Currency" value="USD" fullWidth SelectProps={{ native: true }}>
-        <option value="USD">USD</option>
-      </TextField>
+    <Stack spacing={2} sx={{ maxWidth: 560 }}>
+      <Alert severity="info">Set your preferred currency under Tax. Each property can also have its own operating currency. Recorded amounts stay in the currency they were entered in.</Alert>
       <TextField select label="Date Format" value="locale" fullWidth SelectProps={{ native: true }}>
         <option value="locale">System default</option>
       </TextField>
@@ -91,7 +129,7 @@ export function IndividualSettingsPage() {
           {tab === 2 && <NotificationsTab />}
           {tab === 3 && <BillingTab />}
           {tab === 4 && <PreferencesTab />}
-          {tabs[tab] === 'Tax' && <TaxProfileForm />}
+          {tabs[tab] === 'Tax' && <JurisdictionSettings />}
           {tabs[tab] === 'API' && <Alert severity="warning">API access is enabled for your plan.</Alert>}
           {tabs[tab] === 'Users' && <Alert severity="warning">Multi-user management is enabled for your plan.</Alert>}
         </CardContent>

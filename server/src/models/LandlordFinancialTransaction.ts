@@ -65,6 +65,7 @@ export interface ILandlordFinancialTransaction extends Document {
   taxSnapshotId?: Types.ObjectId;
   taxCalculationStatus?: string;
   taxPeriodKey?: string;
+  settlementStatus?: 'UNSETTLED' | 'SETTLED' | 'NOT_AN_OBLIGATION';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -110,7 +111,12 @@ const LandlordFinancialTransactionSchema = new Schema<ILandlordFinancialTransact
     sourceMaintenanceId: { type: Schema.Types.ObjectId, ref: 'MaintenanceRequest' },
     taxSnapshotId: { type: Schema.Types.ObjectId, ref: 'TransactionTaxSnapshot', required: false, index: true },
     taxCalculationStatus: { type: String, required: false, index: true },
-    taxPeriodKey: { type: String, required: false, index: true }
+    taxPeriodKey: { type: String, required: false, index: true },
+    settlementStatus: {
+      type: String,
+      enum: ['UNSETTLED', 'SETTLED', 'NOT_AN_OBLIGATION'],
+      default: 'NOT_AN_OBLIGATION'
+    }
   },
   { timestamps: true }
 );
@@ -123,7 +129,7 @@ LandlordFinancialTransactionSchema.index({ companyId: 1, taxPeriodKey: 1, taxCal
 function onlyAllowedCanonicalUpdate(update: Record<string, unknown> | null | undefined): boolean {
   const set = (update?.$set || update || {}) as Record<string, unknown>;
   const keys = Object.keys(set).filter((key) => key !== 'updatedAt');
-  const allowed = new Set(['status', 'reversedBy', 'propertyAccountId', 'propertyAccountTransactionId', 'taxSnapshotId', 'taxCalculationStatus', 'taxPeriodKey']);
+  const allowed = new Set(['status', 'reversedBy', 'propertyAccountId', 'propertyAccountTransactionId', 'taxSnapshotId', 'taxCalculationStatus', 'taxPeriodKey', 'settlementStatus']);
   return keys.length > 0 && keys.every((key) => allowed.has(key));
 }
 

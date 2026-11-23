@@ -55,6 +55,7 @@ const User_1 = require("../../models/User");
 const commsAndPayments_1 = require("../models/commsAndPayments");
 const constants_1 = require("../constants");
 const flags_1 = require("../flags");
+const operations_1 = require("../../services/individualJurisdiction/operations");
 const logger_1 = require("../../utils/logger");
 const TEMPLATES = {
     VIEWING_REQUESTED: { title: 'Viewing requested', body: '{{tenantName}} requested a viewing for {{propertyName}}.' },
@@ -80,6 +81,12 @@ const TEMPLATES = {
     WORK_COMPLETED: { title: 'Work marked completed', body: 'Maintenance at {{propertyName}} was marked completed.' },
     MAINTENANCE_REOPENED: { title: 'Maintenance reopened', body: 'A tenant reported a problem with completed work at {{propertyName}}.' },
     BROADCAST_MESSAGE: { title: '{{title}}', body: '{{message}}' },
+    LEASE_EXPIRING: { title: 'Lease expiring', body: 'The lease for {{propertyName}} ends on {{date}}.' },
+    INSPECTION_DUE: { title: 'Inspection due', body: 'An inspection is due for {{propertyName}}.' },
+    MUNICIPAL_BILL_DUE: { title: 'Municipal bill due', body: 'A municipal bill of {{amount}} was recorded for {{propertyName}}.' },
+    EXPENSE_ADDED: { title: 'Expense added', body: '{{description}} of {{amount}} was recorded for {{propertyName}}.' },
+    TENANT_ADDED: { title: 'Tenant added', body: '{{tenantName}} was added.' },
+    MAINTENANCE_COMPLETED: { title: 'Maintenance completed', body: 'Maintenance at {{propertyName}} was marked completed.' },
 };
 function render(template, vars) {
     return template.replace(/\{\{(\w+)\}\}/g, (_m, key) => vars[key] || '');
@@ -203,13 +210,16 @@ function notifyEvent(input) {
             if ((existing === null || existing === void 0 ? void 0 : existing.status) === 'FAILED') {
                 yield commsAndPayments_1.NotificationDelivery.deleteOne({ _id: existing._id });
             }
-            const available = channel === 'IN_APP'
-                ? (prefs === null || prefs === void 0 ? void 0 : prefs.inAppAvailable) !== false
-                : channel === 'EMAIL'
-                    ? ((prefs === null || prefs === void 0 ? void 0 : prefs.emailAvailable) !== false && (operational ? (prefs === null || prefs === void 0 ? void 0 : prefs.emailOperational) !== false : prefs === null || prefs === void 0 ? void 0 : prefs.emailMarketing))
-                    : channel === 'SMS'
-                        ? Boolean(prefs === null || prefs === void 0 ? void 0 : prefs.smsAvailable) && (operational ? (prefs === null || prefs === void 0 ? void 0 : prefs.smsOperational) !== false : prefs === null || prefs === void 0 ? void 0 : prefs.smsMarketing)
-                        : Boolean(prefs === null || prefs === void 0 ? void 0 : prefs.whatsappAvailable) && (operational ? (prefs === null || prefs === void 0 ? void 0 : prefs.whatsappOperational) !== false : prefs === null || prefs === void 0 ? void 0 : prefs.whatsappMarketing);
+            const eventDecision = (0, operations_1.individualChannelDecision)(prefs === null || prefs === void 0 ? void 0 : prefs.individualEvents, eventType, channel);
+            const available = eventDecision === 'skip'
+                ? false
+                : channel === 'IN_APP'
+                    ? (prefs === null || prefs === void 0 ? void 0 : prefs.inAppAvailable) !== false
+                    : channel === 'EMAIL'
+                        ? ((prefs === null || prefs === void 0 ? void 0 : prefs.emailAvailable) !== false && (operational ? (prefs === null || prefs === void 0 ? void 0 : prefs.emailOperational) !== false : prefs === null || prefs === void 0 ? void 0 : prefs.emailMarketing))
+                        : channel === 'SMS'
+                            ? Boolean(prefs === null || prefs === void 0 ? void 0 : prefs.smsAvailable) && (operational ? (prefs === null || prefs === void 0 ? void 0 : prefs.smsOperational) !== false : prefs === null || prefs === void 0 ? void 0 : prefs.smsMarketing)
+                            : Boolean(prefs === null || prefs === void 0 ? void 0 : prefs.whatsappAvailable) && (operational ? (prefs === null || prefs === void 0 ? void 0 : prefs.whatsappOperational) !== false : prefs === null || prefs === void 0 ? void 0 : prefs.whatsappMarketing);
             const globallyOn = channel === 'IN_APP' ? true : (0, flags_1.isChannelGloballyEnabled)(channel);
             if (!available || !globallyOn) {
                 yield commsAndPayments_1.NotificationDelivery.create({
@@ -218,7 +228,7 @@ function notifyEvent(input) {
                     channel,
                     status: 'SKIPPED',
                     idempotencyKey: key,
-                    failureReason: !globallyOn ? 'channel_unconfigured' : 'preference_or_unavailable',
+                    failureReason: eventDecision === 'skip' ? 'preference_disabled' : !globallyOn ? 'channel_unconfigured' : 'preference_or_unavailable',
                 });
                 continue;
             }

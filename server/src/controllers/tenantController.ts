@@ -190,6 +190,20 @@ export const createTenant = async (req: Request, res: Response) => {
       propertyIdsCount: Array.isArray(tenantData.propertyIds) ? tenantData.propertyIds.length : 0
     });
 
+    const { Company } = await import('../models/Company');
+    const ownerCompany = await Company.findById(req.user.companyId).select('workspaceType').lean();
+    if ((ownerCompany as any)?.workspaceType === 'individual') {
+      const { NotificationService } = await import('../ecosystem/services/notificationService');
+      NotificationService.notifyEvent({
+        recipientId: req.user.userId,
+        companyId: req.user.companyId,
+        eventType: 'TENANT_ADDED',
+        variables: { tenantName: `${firstName} ${lastName}`.trim() },
+        idempotencyKey: `tenant-added:${newTenant._id}`,
+        operational: true
+      }).catch(() => undefined);
+    }
+
     res.status(201).json(newTenant);
   } catch (error: unknown) {
     logger.error('Error creating tenant', { error, body: req.body });

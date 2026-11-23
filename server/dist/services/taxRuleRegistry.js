@@ -23,6 +23,7 @@ exports.createCentralStandardVatRate = createCentralStandardVatRate;
 exports.listTaxRules = listTaxRules;
 const TaxRule_1 = require("../models/TaxRule");
 const vatCalculation_1 = require("./tax/vatCalculation");
+const publishedRules_1 = require("./individualJurisdiction/publishedRules");
 const startOfDayUtc = (value) => new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
 const dayBefore = (value) => new Date(value.getTime() - 24 * 60 * 60 * 1000);
 /**
@@ -90,6 +91,126 @@ function systemTaxRuleSeeds() {
             sourceReference: 'Finance Act s14(2b); ZIMRA tax rates — income of an individual from trade and investments',
             sourceDocument: 'https://www.zimra.co.zw/domestic-taxes/corporate/tax-rates ; Finance Act 13 of 2023 / Public Notice 9 of 2024 (24% to 25% from year of assessment beginning 1 January 2024)',
             notes: 'Flat rate on taxable income from trade/investment. Distinct from PAYE/remuneration progressive bands (0/20/25/30/35/40). Distinct from company/trust s14(2c) even though the published rate is also 25%. AIDS levy is NOT included in this rate; ITF 12C box 26 is a separate review item. Presumptive rental tax (PN 08) is a final tax and is not this rule. Do not apply this rule to PAYE. Capital allowances and tax credits are not implemented in this version.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZW',
+            taxType: 'AIDS_LEVY',
+            ruleCode: 'ZW_AIDS_LEVY',
+            version: 1,
+            description: 'AIDS levy of 3% on income tax chargeable',
+            effectiveFrom: new Date(Date.UTC(2024, 0, 1)),
+            effectiveTo: null,
+            rate: publishedRules_1.ZW_AIDS_LEVY_PERCENT,
+            calculationMethod: 'TAX_CHARGEABLE_PERCENT',
+            sourceReference: 'AIDS levy of 3% on income tax chargeable',
+            sourceDocument: 'ZIMRA — AIDS levy is charged on tax chargeable and is not part of the 25% rate',
+            notes: 'Estimate only. Do not add this percentage into ZW_INCOME_TAX_TRADE_INVESTMENT_2024. Do not apply it to presumptive rental income tax.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'INCOME_TAX',
+            ruleCode: 'ZA_INDIVIDUAL_BRACKETS_2027',
+            version: 1,
+            description: 'SARS individual tax brackets for the 2027 tax year',
+            effectiveFrom: publishedRules_1.SA_TAX_YEAR_2027.effectiveFrom,
+            effectiveTo: publishedRules_1.SA_TAX_YEAR_2027.effectiveTo,
+            rate: null,
+            calculationMethod: 'PROGRESSIVE_BRACKETS',
+            sourceReference: publishedRules_1.SA_TAX_YEAR_2027.sourceReference,
+            sourceDocument: publishedRules_1.SA_TAX_YEAR_2027.sourceDocument,
+            notes: 'Brackets, rebates and thresholds are stored in publishedRules.SA_TAX_YEAR_2027. Do not apply a single rate to rental profit. Do not use this rule for Zimbabwe income.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'VAT',
+            ruleCode: 'ZA_VAT_STANDARD',
+            version: 1,
+            description: 'Standard South African VAT rate of 15%',
+            effectiveFrom: publishedRules_1.SA_VAT.standardFrom,
+            effectiveTo: null,
+            rate: publishedRules_1.SA_VAT.standardPercent,
+            calculationMethod: 'STANDARD_PERCENT',
+            sourceReference: publishedRules_1.SA_VAT.sourceReference,
+            sourceDocument: 'SARS Budget 2026 tax guide — Value-Added Tax',
+            notes: 'Residential dwelling accommodation is generally exempt. Do not claim input tax against exempt residential supplies. Do not apply this rate to Zimbabwe properties.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'VAT_THRESHOLD',
+            ruleCode: 'ZA_VAT_COMPULSORY_THRESHOLD',
+            version: 1,
+            description: 'Compulsory VAT registration threshold before 1 April 2026',
+            effectiveFrom: new Date(Date.UTC(2009, 2, 1)),
+            effectiveTo: new Date(Date.UTC(2026, 2, 31)),
+            rate: publishedRules_1.SA_VAT.compulsoryThresholdBeforeApril2026,
+            calculationMethod: 'ANNUAL_TAXABLE_SUPPLIES',
+            sourceReference: 'SARS — historic compulsory VAT registration threshold of R1 million',
+            sourceDocument: 'SARS VAT registration thresholds before the Budget 2026 increase',
+            notes: 'Superseded for periods from 1 April 2026.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'VAT_THRESHOLD',
+            ruleCode: 'ZA_VAT_COMPULSORY_THRESHOLD',
+            version: 2,
+            description: 'Compulsory VAT registration threshold from 1 April 2026',
+            effectiveFrom: publishedRules_1.SA_VAT.thresholdChange,
+            effectiveTo: null,
+            rate: publishedRules_1.SA_VAT.compulsoryThresholdFromApril2026,
+            calculationMethod: 'ANNUAL_TAXABLE_SUPPLIES',
+            sourceReference: publishedRules_1.SA_VAT.sourceReference,
+            sourceDocument: 'SARS Budget 2026 tax guide — compulsory registration above R2.3 million',
+            notes: 'Effective 1 April 2026. Registration is not automatic inside Mantis.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'VAT_THRESHOLD',
+            ruleCode: 'ZA_VAT_VOLUNTARY_THRESHOLD',
+            version: 1,
+            description: 'Voluntary VAT registration threshold before 1 April 2026',
+            effectiveFrom: new Date(Date.UTC(2009, 2, 1)),
+            effectiveTo: new Date(Date.UTC(2026, 2, 31)),
+            rate: publishedRules_1.SA_VAT.voluntaryThresholdBeforeApril2026,
+            calculationMethod: 'ANNUAL_TAXABLE_SUPPLIES',
+            sourceReference: 'SARS — historic voluntary VAT registration threshold of R50,000',
+            sourceDocument: 'SARS VAT registration thresholds before the Budget 2026 increase',
+            notes: 'Superseded for periods from 1 April 2026.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'VAT_THRESHOLD',
+            ruleCode: 'ZA_VAT_VOLUNTARY_THRESHOLD',
+            version: 2,
+            description: 'Voluntary VAT registration threshold from 1 April 2026',
+            effectiveFrom: publishedRules_1.SA_VAT.thresholdChange,
+            effectiveTo: null,
+            rate: publishedRules_1.SA_VAT.voluntaryThresholdFromApril2026,
+            calculationMethod: 'ANNUAL_TAXABLE_SUPPLIES',
+            sourceReference: publishedRules_1.SA_VAT.sourceReference,
+            sourceDocument: 'SARS Budget 2026 tax guide — voluntary registration above R120,000',
+            notes: 'Effective 1 April 2026. Voluntary registration is not turned on automatically.',
+            status: 'ACTIVE'
+        },
+        {
+            jurisdiction: 'ZA',
+            taxType: 'TURNOVER_TAX',
+            ruleCode: 'ZA_TURNOVER_TAX_2027',
+            version: 1,
+            description: 'SARS turnover tax table for individuals, 2027 tax year',
+            effectiveFrom: publishedRules_1.SA_TURNOVER_TAX_2027.effectiveFrom,
+            effectiveTo: publishedRules_1.SA_TURNOVER_TAX_2027.effectiveTo,
+            rate: null,
+            calculationMethod: 'PROGRESSIVE_TURNOVER',
+            sourceReference: publishedRules_1.SA_TURNOVER_TAX_2027.sourceReference,
+            sourceDocument: 'SARS Budget 2026 tax guide — Turnover tax for micro businesses',
+            notes: 'Apply only after the owner confirms eligibility and election. Do not activate for an ordinary individual landlord.',
             status: 'ACTIVE'
         }
     ];
@@ -283,10 +404,10 @@ function createCentralStandardVatRate(input) {
         return toTaxRuleRecord(created);
     });
 }
-function listTaxRules(taxType) {
-    return __awaiter(this, void 0, void 0, function* () {
+function listTaxRules(taxType_1) {
+    return __awaiter(this, arguments, void 0, function* (taxType, jurisdiction = 'ZW') {
         yield ensureSystemTaxRules();
-        const query = { jurisdiction: 'ZW' };
+        const query = { jurisdiction };
         if (taxType)
             query.taxType = taxType;
         const docs = yield TaxRule_1.TaxRule.find(query).sort({ taxType: 1, effectiveFrom: 1, version: 1 });

@@ -25,6 +25,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getDashboardPath } from '../../utils/registrationUtils';
 import { readOnboardingState, writeOnboardingState, type OnboardingRole } from '../../utils/onboardingState';
 import { ROUTES } from '../LandingPage/landingData';
+import individualWorkspaceService from '../../services/individualWorkspaceService';
 
 const steps = ['Company Basics', 'Preferences', 'Portfolio', 'Team', 'Initialize'];
 
@@ -57,7 +58,11 @@ const WorkspaceSetup: React.FC = () => {
     currency: company?.workspacePreferences?.currency || 'USD',
     timezone: company?.workspacePreferences?.timezone || 'Africa/Harare',
     measurementUnits: company?.workspacePreferences?.measurementUnits || 'metric',
-    invoicePrefix: company?.workspacePreferences?.invoicePrefix || 'INV'
+    invoicePrefix: company?.workspacePreferences?.invoicePrefix || 'INV',
+    countryOfResidence: 'ZW',
+    taxResidencyCountry: 'ZW',
+    taxJurisdiction: 'ZW',
+    preferredCurrency: 'USD'
   });
 
   // If company loads after first render, hydrate any still-empty fields.
@@ -107,6 +112,15 @@ const WorkspaceSetup: React.FC = () => {
       ...(complete ? { onboardingStatus: 'ACTIVE', onboardingCompleted: true, tenantStatus: 'active' } : {})
     });
     await refreshCompany();
+    if (isLandlordLike) {
+      await individualWorkspaceService.updateTaxProfile({
+        countryOfResidence: form.countryOfResidence,
+        taxResidencyCountry: form.taxResidencyCountry,
+        taxResidence: form.taxResidencyCountry,
+        taxJurisdiction: form.taxJurisdiction,
+        preferredCurrency: form.preferredCurrency
+      }).catch(() => undefined);
+    }
   };
 
   const handleNext = async () => {
@@ -229,6 +243,37 @@ const WorkspaceSetup: React.FC = () => {
                     <MenuItem value="ZiG">ZiG</MenuItem>
                   </TextField>
                 </Grid>
+                {isLandlordLike && (
+                  <>
+                    <Grid item xs={12} md={6}>
+                      <TextField select fullWidth label="Country of residence" name="countryOfResidence" value={form.countryOfResidence} onChange={handleChange}>
+                        <MenuItem value="ZW">Zimbabwe</MenuItem>
+                        <MenuItem value="ZA">South Africa</MenuItem>
+                        <MenuItem value="GLOBAL">Other country</MenuItem>
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField select fullWidth label="Tax residency" name="taxResidencyCountry" value={form.taxResidencyCountry} onChange={handleChange}>
+                        <MenuItem value="ZW">Zimbabwe</MenuItem>
+                        <MenuItem value="ZA">South Africa</MenuItem>
+                        <MenuItem value="GLOBAL">Other country</MenuItem>
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField select fullWidth label="Tax profile" name="taxJurisdiction" value={form.taxJurisdiction} onChange={handleChange}>
+                        <MenuItem value="ZW">Zimbabwe</MenuItem>
+                        <MenuItem value="ZA">South Africa</MenuItem>
+                        <MenuItem value="GLOBAL">Other country</MenuItem>
+                      </TextField>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField select fullWidth label="Preferred currency" name="preferredCurrency" value={form.preferredCurrency} onChange={handleChange}>
+                        <MenuItem value="USD">USD</MenuItem>
+                        <MenuItem value="ZAR">ZAR</MenuItem>
+                      </TextField>
+                    </Grid>
+                  </>
+                )}
                 <Grid item xs={12} md={6}>
                   <TextField fullWidth label="Timezone" name="timezone" value={form.timezone} onChange={handleChange} />
                 </Grid>

@@ -62,7 +62,12 @@ const LandlordFinancialTransactionSchema = new mongoose_1.Schema({
     sourceMaintenanceId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'MaintenanceRequest' },
     taxSnapshotId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'TransactionTaxSnapshot', required: false, index: true },
     taxCalculationStatus: { type: String, required: false, index: true },
-    taxPeriodKey: { type: String, required: false, index: true }
+    taxPeriodKey: { type: String, required: false, index: true },
+    settlementStatus: {
+        type: String,
+        enum: ['UNSETTLED', 'SETTLED', 'NOT_AN_OBLIGATION'],
+        default: 'NOT_AN_OBLIGATION'
+    }
 }, { timestamps: true });
 LandlordFinancialTransactionSchema.index({ companyId: 1, idempotencyKey: 1 }, { unique: true });
 LandlordFinancialTransactionSchema.index({ companyId: 1, propertyId: 1, date: -1 });
@@ -71,7 +76,7 @@ LandlordFinancialTransactionSchema.index({ companyId: 1, taxPeriodKey: 1, taxCal
 function onlyAllowedCanonicalUpdate(update) {
     const set = ((update === null || update === void 0 ? void 0 : update.$set) || update || {});
     const keys = Object.keys(set).filter((key) => key !== 'updatedAt');
-    const allowed = new Set(['status', 'reversedBy', 'propertyAccountId', 'propertyAccountTransactionId', 'taxSnapshotId', 'taxCalculationStatus', 'taxPeriodKey']);
+    const allowed = new Set(['status', 'reversedBy', 'propertyAccountId', 'propertyAccountTransactionId', 'taxSnapshotId', 'taxCalculationStatus', 'taxPeriodKey', 'settlementStatus']);
     return keys.length > 0 && keys.every((key) => allowed.has(key));
 }
 LandlordFinancialTransactionSchema.pre('findOneAndUpdate', function (next) {

@@ -212,16 +212,128 @@ export function getDemoIndividualSummary(): IndividualSummary {
   };
 }
 
-export function getDemoAccounting() {
+function demoQuery(path: string) {
+  const query = path.includes('?') ? path.slice(path.indexOf('?') + 1) : '';
+  return new URLSearchParams(query);
+}
+
+function demoPeriod(path: string) {
+  const basis = demoQuery(path).get('period') || 'this_month';
+  const labels: Record<string, string> = {
+    this_month: 'This month',
+    previous_month: 'Previous month',
+    this_quarter: 'This quarter',
+    this_year: 'This year',
+    previous_year: 'Previous year',
+    year_to_date: 'Year to date',
+    custom: 'Custom range'
+  };
+  const month = { kind: 'month' as const, monthKey: '2026-09', year: 2026, message: null };
+  const year = (value: number) => ({ kind: 'year' as const, monthKey: null, year: value, message: null });
+  const unsupported = (message: string) => ({ kind: 'unsupported' as const, monthKey: null, year: 2026, message });
+  const taxScope = basis === 'this_month' || basis === 'previous_month'
+    ? month
+    : basis === 'this_year'
+      ? year(2026)
+      : basis === 'previous_year'
+        ? year(2025)
+        : basis === 'this_quarter'
+          ? unsupported('A quarterly tax working paper is not available. Choose a single month, or a full year for the annual schedule.')
+          : basis === 'year_to_date'
+            ? unsupported('Tax working papers are prepared by calendar month or full year. Year to date is not a tax period.')
+            : unsupported('Tax working papers are prepared by calendar month or full year. Choose one of those periods to see tax figures.');
+  return {
+    basis,
+    label: labels[basis] || 'This month',
+    start: null,
+    end: null,
+    timeZone: 'Africa/Harare',
+    taxScope
+  };
+}
+
+export function getDemoIndividualReport(path: string) {
+  const type = path.split('/individual/reports/')[1]?.split('?')[0] || 'profit-loss';
+  const propertyId = demoQuery(path).get('propertyId') || '';
+  const category = demoQuery(path).get('category') || '';
+  const selectedName = DEMO_PROPERTIES.find((property) => property.propertyId === propertyId)?.propertyName || '';
+  const properties = DEMO_PROPERTIES.filter((property) => !selectedName || property.propertyName === selectedName).map((property) => ({
+    property: property.propertyName,
+    currency: 'USD',
+    income: property.monthlyIncome,
+    expenses: property.monthlyExpenses,
+    netProfit: property.netProfit,
+    expectedRent: property.expectedRent,
+    collectedRent: property.collectedRent,
+    outstandingRent: property.outstandingRent,
+    collectionPercent: property.collectionPercent,
+    status: property.rentCollectionStatus,
+    units: 1,
+    occupiedUnits: property.occupancyStatus === 'Occupied' ? 1 : 0,
+    vacantUnits: property.occupancyStatus === 'Occupied' ? 0 : 1,
+    occupancyPercent: property.occupancyPercent
+  }));
+  const rows = type === 'occupancy'
+    ? properties.map((property) => ({ property: property.property, units: property.units, occupiedUnits: property.occupiedUnits, vacantUnits: property.vacantUnits, occupancyPercent: property.occupancyPercent }))
+    : type === 'expense' || type.includes('expense')
+      ? (category === 'Maintenance' || (selectedName && selectedName !== 'Avondale Court 2A') ? [] : [{ date: '2026-09-04', property: 'Avondale Court 2A', category: 'Municipal', description: 'Municipal bill', amount: 86, currency: 'USD', reference: 'DEMO-86', status: 'completed' }])
+      : type === 'rent-collection'
+        ? properties.map((property) => ({ property: property.property, currency: 'USD', expectedRent: property.expectedRent, collectedRent: property.collectedRent, outstandingRent: property.outstandingRent, collectionPercent: property.collectionPercent, status: property.status }))
+        : type === 'property-ledger'
+          ? (selectedName && selectedName !== '12 Arundel Road' ? [] : [{ date: '2026-09-02', property: '12 Arundel Road', entry: 'income', category: 'Rent', description: 'Rent received', amount: 1200, balance: 1200, reference: 'DEMO-RENT' }])
+          : properties.map((property) => ({ property: property.property, currency: 'USD', income: property.income, expenses: property.expenses, netProfit: property.netProfit }));
+  return {
+    reportType: type,
+    title: 'Sample report',
+    rows,
+    generatedAt: new Date().toISOString(),
+    period: demoPeriod(path),
+    account: { name: 'Sample Portfolio', currency: 'USD', timeZone: 'Africa/Harare' },
+    propertyName: DEMO_PROPERTIES.find((property) => property.propertyId === propertyId)?.propertyName || 'All properties',
+    currency: 'USD',
+    series: [{ currency: 'USD', points: [
+      { month: '2026-08', income: 4100, expenses: 820, net: 3280 },
+      { month: '2026-09', income: 4280, expenses: 800, net: 3480 }
+    ] }],
+    note: null
+  };
+}
+
+export function getDemoAccounting(path = '') {
   const dashboard = getDemoIndividualSummary();
-  const ranked = [...dashboard.properties].sort((a, b) => b.netProfit - a.netProfit);
+  const propertyId = demoQuery(path).get('propertyId') || '';
+  const selected = propertyId ? dashboard.properties.filter((property) => property.propertyId === propertyId) : dashboard.properties;
+  const properties = selected.length ? selected : dashboard.properties;
+  const monthlyIncome = properties.reduce((sum, property) => sum + property.monthlyIncome, 0);
+  const monthlyExpenses = properties.reduce((sum, property) => sum + property.monthlyExpenses, 0);
+  const outstandingRent = properties.reduce((sum, property) => sum + property.outstandingRent, 0);
+  const ranked = [...properties].sort((a, b) => b.netProfit - a.netProfit);
   return {
     ...dashboard,
+    summary: {
+      ...dashboard.summary,
+      totalProperties: properties.length,
+      monthlyIncome,
+      monthlyExpenses,
+      netProfit: monthlyIncome - monthlyExpenses,
+      outstandingRent,
+      netMonthlyCashflow: monthlyIncome - monthlyExpenses
+    },
+    properties,
+    period: demoPeriod(path),
+    account: { name: 'Sample Portfolio', currency: 'USD', timeZone: 'Africa/Harare' },
+    propertyChoices: dashboard.properties.map((property) => ({ propertyId: property.propertyId, propertyName: property.propertyName })),
+    outstandingRentReliable: true,
+    unpaidBills: [{ currency: 'USD', amount: 0 }],
+    periodSeries: [{ currency: 'USD', points: [
+      { month: '2026-08', income: 4100, expenses: 820, net: 3280 },
+      { month: '2026-09', income: 4280, expenses: 800, net: 3480 }
+    ] }],
     overview: {
-      monthlyIncome: dashboard.summary.monthlyIncome,
-      monthlyExpenses: dashboard.summary.monthlyExpenses,
-      netProfit: dashboard.summary.netProfit,
-      outstandingRent: dashboard.summary.outstandingRent
+      monthlyIncome,
+      monthlyExpenses,
+      netProfit: monthlyIncome - monthlyExpenses,
+      outstandingRent
     },
     topPerformingProperties: ranked.slice(0, 3),
     worstPerformingProperties: ranked.slice(-2).reverse()
@@ -402,6 +514,39 @@ export function getDemoExecutiveDashboard(): ExecutiveDashboardData {
   };
 }
 
+export function getDemoPropertyEditor(path: string) {
+  const id = path.split('/individual/properties/')[1]?.split('/')[0] || '';
+  const property = DEMO_PROPERTIES.find((item) => item.propertyId === id);
+  if (!property) return { name: '', address: '', charges: [], hasFinancialHistory: false };
+  return {
+    propertyId: property.propertyId,
+    name: property.propertyName,
+    address: property.address,
+    city: 'Harare',
+    country: 'Zimbabwe',
+    type: 'house',
+    description: '',
+    status: property.occupancyStatus === 'Occupied' ? 'rented' : 'available',
+    rent: property.monthlyRent,
+    rentFrequency: 'monthly',
+    rentDueDay: 1,
+    paymentTerms: '',
+    rentEffectiveFrom: '',
+    pendingRent: null,
+    pendingRentEffectiveFrom: '',
+    currency: 'USD',
+    bedrooms: 0,
+    bathrooms: 0,
+    parkingSpaces: 0,
+    area: 0,
+    amenities: [],
+    charges: [],
+    hasFinancialHistory: true,
+    vatSupplyTreatment: null,
+    rentalTaxTreatment: null
+  };
+}
+
 export function resolveDemoGet(url: string): unknown {
   const path = url.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/api/, '');
 
@@ -525,8 +670,11 @@ export function resolveDemoGet(url: string): unknown {
     };
   }
   if (path.includes('/individual/tax/periods')) return [];
+  if (path.includes('/individual/reports/')) return getDemoIndividualReport(path);
   if (path.includes('/individual/dashboard')) return getDemoIndividualSummary();
-  if (path.includes('/individual/accounting')) return getDemoAccounting();
+  if (path.includes('/individual/property-charges')) return [];
+  if (path.includes('/individual/properties/') && path.includes('/editor')) return getDemoPropertyEditor(path);
+  if (path.includes('/individual/accounting')) return getDemoAccounting(path);
   if (path.includes('/individual/income')) return { data: [] };
   if (path.includes('/individual/expenses') || path.includes('/individual/expense')) return DEMO_EXPENSES;
   if (path.includes('/leases')) return { data: DEMO_LEASES };

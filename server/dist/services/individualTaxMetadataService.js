@@ -61,6 +61,7 @@ const accountingPostingPolicy_1 = require("./accountingPostingPolicy");
 const accountingPeriodService_1 = require("./accountingPeriodService");
 const individualTaxProfileService_1 = __importDefault(require("./individualTaxProfileService"));
 const taxRuleRegistry_1 = require("./taxRuleRegistry");
+const publishedRules_1 = require("./individualJurisdiction/publishedRules");
 const taxClassificationService_1 = require("./taxClassificationService");
 const taxPeriodService_1 = require("./taxPeriodService");
 const taxMetadataTypes_1 = require("./tax/taxMetadataTypes");
@@ -152,13 +153,19 @@ function persistSnapshot(input) {
 }
 function loadClassificationContext(companyId, propertyId, transactionDate) {
     return __awaiter(this, void 0, void 0, function* () {
-        const [owner, propertyProfile, vatRule, presumptiveRule, incomeTaxRule, company] = yield Promise.all([
+        const [owner, propertyProfile, company] = yield Promise.all([
             individualTaxProfileService_1.default.getOwnerProfile(companyId),
             individualTaxProfileService_1.default.getPropertyProfile(companyId, propertyId),
-            (0, taxRuleRegistry_1.getEffectiveTaxRule)('VAT', transactionDate),
-            (0, taxRuleRegistry_1.getEffectiveTaxRule)('PRESUMPTIVE_RENTAL_INCOME_TAX', transactionDate),
-            (0, taxRuleRegistry_1.getEffectiveTaxRule)('INCOME_TAX', transactionDate),
             Company_1.Company.findById(companyId).select('taxProfile vatNumber').lean()
+        ]);
+        const propertyJurisdiction = (0, publishedRules_1.resolveIndividualJurisdiction)(propertyProfile.locationCountry, owner.taxJurisdiction);
+        const residencyJurisdiction = (0, publishedRules_1.resolveIndividualJurisdiction)(owner.taxResidencyCountry || owner.taxResidence, owner.taxJurisdiction);
+        const attachZwPropertyRules = propertyJurisdiction === 'ZW';
+        const attachZwIncomeRule = propertyJurisdiction === 'ZW' && residencyJurisdiction === 'ZW';
+        const [vatRule, presumptiveRule, incomeTaxRule] = yield Promise.all([
+            attachZwPropertyRules ? (0, taxRuleRegistry_1.getEffectiveTaxRule)('VAT', transactionDate, 'ZW') : Promise.resolve(null),
+            attachZwPropertyRules ? (0, taxRuleRegistry_1.getEffectiveTaxRule)('PRESUMPTIVE_RENTAL_INCOME_TAX', transactionDate, 'ZW') : Promise.resolve(null),
+            attachZwIncomeRule ? (0, taxRuleRegistry_1.getEffectiveTaxRule)('INCOME_TAX', transactionDate, 'ZW') : Promise.resolve(null)
         ]);
         const taxProfile = (company === null || company === void 0 ? void 0 : company.taxProfile) || {};
         return { owner, propertyProfile, vatRule, presumptiveRule, incomeTaxRule, taxProfile };

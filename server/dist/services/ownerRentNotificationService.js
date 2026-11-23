@@ -19,6 +19,7 @@ const OwnerPreferences_1 = require("../models/OwnerPreferences");
 const OwnerRentNotice_1 = require("../models/OwnerRentNotice");
 const Payment_1 = require("../models/Payment");
 const emailService_1 = require("./emailService");
+const notificationService_1 = require("../ecosystem/services/notificationService");
 const ownerRentNotificationPolicy_1 = require("./ownerRentNotificationPolicy");
 var ownerRentNotificationPolicy_2 = require("./ownerRentNotificationPolicy");
 Object.defineProperty(exports, "buildOwnerRentEmail", { enumerable: true, get: function () { return ownerRentNotificationPolicy_2.buildOwnerRentEmail; } });
@@ -62,6 +63,21 @@ function notifyOwnerOfRentPayment(payment, options) {
             }).select('name address companyId').lean();
             if (!property)
                 return;
+            const companyRecord = yield Company_1.Company.findById(payment.companyId).select('name workspaceType ownerId').lean();
+            if ((companyRecord === null || companyRecord === void 0 ? void 0 : companyRecord.workspaceType) === 'individual' && companyRecord.ownerId) {
+                yield notificationService_1.NotificationService.notifyEvent({
+                    recipientId: String(companyRecord.ownerId),
+                    companyId: String(payment.companyId),
+                    eventType: 'RENT_PAYMENT_RECEIVED',
+                    variables: {
+                        amount: `${payment.currency || 'USD'} ${Number(payment.amount || 0)}`,
+                        propertyName: String(property.name || property.address || 'your property')
+                    },
+                    idempotencyKey: `individual-rent:${payment._id}`,
+                    operational: true
+                });
+                return;
+            }
             const ownerRows = yield PropertyOwner_1.PropertyOwner.find({
                 companyId: payment.companyId,
                 properties: payment.propertyId,

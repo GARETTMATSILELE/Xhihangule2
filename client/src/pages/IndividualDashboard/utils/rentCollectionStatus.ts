@@ -158,13 +158,10 @@ function coveredMonthsFromPayment(payment: Payment | Record<string, unknown>): A
   return [{ year: paymentDate.getFullYear(), month: paymentDate.getMonth() + 1 }];
 }
 
-function dueDateForMonth(year: number, month: number, rentDueDay: number, leaseStart: Date, leaseEnd: Date): Date {
+function dueDateForMonth(year: number, month: number, rentDueDay: number): Date {
   const monthEnd = new Date(year, month, 0);
   const dueDay = Math.min(Math.max(1, rentDueDay), monthEnd.getDate());
-  let dueDate = new Date(year, month - 1, dueDay);
-  if (dueDate < leaseStart) dueDate = leaseStart;
-  if (dueDate > leaseEnd) dueDate = leaseEnd;
-  return dueDate;
+  return new Date(year, month - 1, dueDay);
 }
 
 function generateDuePeriods(lease: Lease | Record<string, unknown>, asOf: Date): Array<Omit<RentPeriodBalance, 'paid' | 'outstanding' | 'status'>> {
@@ -186,8 +183,12 @@ function generateDuePeriods(lease: Lease | Record<string, unknown>, asOf: Date):
   while (cursor <= lastMonth) {
     const year = cursor.getFullYear();
     const month = cursor.getMonth() + 1;
-    const dueDate = dueDateForMonth(year, month, rentDueDay, leaseStart, leaseEnd);
-    if (dueDate <= today && dueDate >= leaseStart) {
+    const dueDate = dueDateForMonth(year, month, rentDueDay);
+    // Bill a month only when its due date falls inside the lease and has arrived.
+    // Moving an earlier due date forward to the lease start was charging a full
+    // month (for example October) on a lease that began after that due day, so a
+    // later rent payment never cleared the rent collection status.
+    if (dueDate >= leaseStart && dueDate <= leaseEnd && dueDate <= today) {
       periods.push({
         month,
         year,
@@ -227,9 +228,11 @@ function allocatePayments(
   }
 
   const balances: RentPeriodBalance[] = periods.map((period) => {
-    const paid = toMoney(paidByMonth.get(period.key) || 0);
+    const applied = toMoney(paidByMonth.get(period.key) || 0);
     paidByMonth.delete(period.key);
-    const outstanding = toMoney(Math.max(0, period.expected - paid));
+    const paid = toMoney(Math.min(applied, period.expected));
+    leftover = toMoney(leftover + Math.max(0, applied - period.expected));
+    const outstanding = toMoney(period.expected - paid);
     return {
       ...period,
       paid,

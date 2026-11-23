@@ -23,6 +23,7 @@ const vatApplicability_1 = require("./tax/vatApplicability");
 const taxTypes_1 = require("./tax/taxTypes");
 const rentalTaxTypes_1 = require("./tax/rentalTaxTypes");
 const taxRuleRegistry_1 = require("./taxRuleRegistry");
+const publishedRules_1 = require("./individualJurisdiction/publishedRules");
 function asObjectId(value, label = 'id') {
     if (!mongoose_1.default.Types.ObjectId.isValid(value))
         throw new errorHandler_1.AppError(`Invalid ${label}`, 400);
@@ -87,8 +88,10 @@ exports.individualTaxProfileService = {
             if (!company)
                 throw new errorHandler_1.AppError('Company not found', 404);
             const stored = yield IndividualTaxProfile_1.IndividualTaxProfile.findOne({ companyId: company._id });
-            const rules = yield (0, taxRuleRegistry_1.listTaxRules)();
+            const taxJurisdiction = (0, publishedRules_1.resolveIndividualJurisdiction)(stored === null || stored === void 0 ? void 0 : stored.taxJurisdiction, (stored === null || stored === void 0 ? void 0 : stored.taxResidence) || company.country);
+            const rules = yield (0, taxRuleRegistry_1.listTaxRules)(undefined, taxJurisdiction);
             const taxProfile = company.taxProfile || {};
+            const enabledTaxes = Array.isArray(stored === null || stored === void 0 ? void 0 : stored.enabledTaxes) ? stored.enabledTaxes : [];
             return {
                 companyId: String(company._id),
                 userId: (stored === null || stored === void 0 ? void 0 : stored.userId) ? String(stored.userId) : company.ownerId ? String(company.ownerId) : null,
@@ -106,8 +109,15 @@ exports.individualTaxProfileService = {
                 incomeTaxRegistrationDate: isoDate(stored === null || stored === void 0 ? void 0 : stored.incomeTaxRegistrationDate),
                 rentalTaxRegime: (0, rentalTaxTypes_1.normalizeRentalTaxRegime)(stored === null || stored === void 0 ? void 0 : stored.rentalTaxRegime),
                 rentalTaxRegistrationDate: isoDate(stored === null || stored === void 0 ? void 0 : stored.rentalTaxRegistrationDate),
-                taxResidence: (stored === null || stored === void 0 ? void 0 : stored.taxResidence) || 'ZW',
-                taxYearStartMonth: Number((stored === null || stored === void 0 ? void 0 : stored.taxYearStartMonth) || 1),
+                taxResidence: (stored === null || stored === void 0 ? void 0 : stored.taxResidence) || taxJurisdiction,
+                countryOfResidence: (stored === null || stored === void 0 ? void 0 : stored.countryOfResidence) || (stored === null || stored === void 0 ? void 0 : stored.taxResidence) || String(company.country || taxJurisdiction),
+                taxResidencyCountry: (stored === null || stored === void 0 ? void 0 : stored.taxResidencyCountry) || (stored === null || stored === void 0 ? void 0 : stored.taxResidence) || taxJurisdiction,
+                preferredCurrency: (stored === null || stored === void 0 ? void 0 : stored.preferredCurrency) || 'USD',
+                taxJurisdiction,
+                enabledTaxes,
+                saProfile: (stored === null || stored === void 0 ? void 0 : stored.saProfile) || {},
+                globalTaxes: Array.isArray(stored === null || stored === void 0 ? void 0 : stored.globalTaxes) ? stored.globalTaxes : [],
+                taxYearStartMonth: Number((stored === null || stored === void 0 ? void 0 : stored.taxYearStartMonth) || (taxJurisdiction === 'ZA' ? 3 : 1)),
                 accountantName: (stored === null || stored === void 0 ? void 0 : stored.accountantName) || '',
                 accountantContact: (stored === null || stored === void 0 ? void 0 : stored.accountantContact) || '',
                 taxNotes: (stored === null || stored === void 0 ? void 0 : stored.taxNotes) || '',
@@ -166,6 +176,29 @@ exports.individualTaxProfileService = {
             const taxResidence = optionalString(payload.taxResidence);
             if (taxResidence !== undefined)
                 profileSet.taxResidence = taxResidence;
+            const countryOfResidence = optionalString(payload.countryOfResidence);
+            if (countryOfResidence !== undefined)
+                profileSet.countryOfResidence = countryOfResidence;
+            const taxResidencyCountry = optionalString(payload.taxResidencyCountry);
+            if (taxResidencyCountry !== undefined) {
+                profileSet.taxResidencyCountry = taxResidencyCountry;
+                if (taxResidence === undefined)
+                    profileSet.taxResidence = taxResidencyCountry;
+            }
+            const preferredCurrency = optionalString(payload.preferredCurrency);
+            if (preferredCurrency !== undefined)
+                profileSet.preferredCurrency = preferredCurrency.toUpperCase();
+            if (payload.taxJurisdiction !== undefined) {
+                const jurisdiction = (0, publishedRules_1.resolveIndividualJurisdiction)(String(payload.taxJurisdiction));
+                profileSet.taxJurisdiction = jurisdiction;
+            }
+            if (Array.isArray(payload.enabledTaxes)) {
+                profileSet.enabledTaxes = payload.enabledTaxes.map((item) => String(item));
+            }
+            if (payload.saProfile && typeof payload.saProfile === 'object')
+                profileSet.saProfile = payload.saProfile;
+            if (Array.isArray(payload.globalTaxes))
+                profileSet.globalTaxes = payload.globalTaxes;
             if (taxYearStartMonth !== undefined)
                 profileSet.taxYearStartMonth = taxYearStartMonth;
             const accountantName = optionalString(payload.accountantName);
@@ -209,7 +242,7 @@ exports.individualTaxProfileService = {
                 eventType: 'TAX_PROFILE_UPDATED',
                 sourceId: companyId,
                 message: 'Updated individual landlord tax profile',
-                metadata: { before, after, userId }
+                metadata: { before, after, userId, historicalSnapshotsPreserved: true }
             });
             return after;
         });
@@ -249,6 +282,8 @@ exports.individualTaxProfileService = {
                 acquisitionCost: property.acquisitionCost == null ? null : Number(property.acquisitionCost),
                 improvementCost: property.improvementCosts == null ? null : Number(property.improvementCosts),
                 taxNotes: String(property.taxNotes || ''),
+                locationCountry: String(property.locationCountry || ''),
+                operatingCurrency: String(property.operatingCurrency || 'USD'),
                 reviewRequired: reviewReasons.length > 0,
                 reviewReasons,
                 disclaimer: rentalTaxTypes_1.TAX_DISCLAIMER
@@ -325,6 +360,12 @@ exports.individualTaxProfileService = {
             const taxNotes = optionalString(payload.taxNotes);
             if (taxNotes !== undefined)
                 $set.taxNotes = taxNotes;
+            const locationCountry = optionalString(payload.locationCountry);
+            if (locationCountry !== undefined)
+                $set.locationCountry = locationCountry;
+            const operatingCurrency = optionalString(payload.operatingCurrency);
+            if (operatingCurrency !== undefined)
+                $set.operatingCurrency = operatingCurrency.toUpperCase();
             if (Object.keys($set).length) {
                 yield Property_1.Property.updateOne({ _id: property._id }, { $set });
             }

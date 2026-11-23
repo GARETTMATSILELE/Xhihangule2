@@ -10,6 +10,7 @@ import { OwnerPreferences } from '../models/OwnerPreferences';
 import { OwnerRentNotice, IOwnerRentNotice } from '../models/OwnerRentNotice';
 import { Payment } from '../models/Payment';
 import { sendMail } from './emailService';
+import { NotificationService } from '../ecosystem/services/notificationService';
 import {
   buildOwnerRentEmail,
   composeOwnerRentNotice,
@@ -82,6 +83,21 @@ export async function notifyOwnerOfRentPayment(payment: {
       companyId: payment.companyId,
     }).select('name address companyId').lean();
     if (!property) return;
+    const companyRecord = await Company.findById(payment.companyId).select('name workspaceType ownerId').lean();
+    if ((companyRecord as any)?.workspaceType === 'individual' && (companyRecord as any).ownerId) {
+      await NotificationService.notifyEvent({
+        recipientId: String((companyRecord as any).ownerId),
+        companyId: String(payment.companyId),
+        eventType: 'RENT_PAYMENT_RECEIVED',
+        variables: {
+          amount: `${payment.currency || 'USD'} ${Number(payment.amount || 0)}`,
+          propertyName: String((property as any).name || (property as any).address || 'your property')
+        },
+        idempotencyKey: `individual-rent:${payment._id}`,
+        operational: true
+      });
+      return;
+    }
     const ownerRows = await PropertyOwner.find({
       companyId: payment.companyId,
       properties: payment.propertyId,

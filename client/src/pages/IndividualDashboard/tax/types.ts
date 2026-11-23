@@ -30,6 +30,13 @@ export type OwnerTaxProfile = {
   rentalTaxRegime: RentalTaxRegime;
   rentalTaxRegistrationDate: string | null;
   taxResidence: string;
+  countryOfResidence?: string;
+  taxResidencyCountry?: string;
+  preferredCurrency?: string;
+  taxJurisdiction?: 'ZW' | 'ZA' | 'GLOBAL';
+  enabledTaxes?: string[];
+  saProfile?: Record<string, any>;
+  globalTaxes?: Array<Record<string, any>>;
   taxYearStartMonth: number;
   accountantName: string;
   accountantContact: string;
@@ -61,6 +68,8 @@ export type PropertyTaxProfile = {
   acquisitionCost: number | null;
   improvementCost: number | null;
   taxNotes: string;
+  locationCountry?: string;
+  operatingCurrency?: string;
   reviewRequired: boolean;
   reviewReasons: string[];
   disclaimer?: string;

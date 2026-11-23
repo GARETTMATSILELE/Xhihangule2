@@ -22,7 +22,7 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { AttachMoney, TrendingDown, TrendingUp } from '@mui/icons-material';
+import { AttachMoney, Edit, TrendingDown, TrendingUp } from '@mui/icons-material';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { workspacePath } from '../../../demo/demoMode';
 import individualWorkspaceService from '../../../services/individualWorkspaceService';
@@ -52,9 +52,11 @@ export function PropertyDetailPage() {
   const [tabValue, setTabValue] = useState(0);
   const [filterMonth, setFilterMonth] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [overview, setOverview] = useState<any>(null);
 
   useEffect(() => {
     individualWorkspaceService.getLedger(propertyId).then(setLedger).finally(() => setLoading(false));
+    individualWorkspaceService.getPropertyFinancialOverview(propertyId).then(setOverview).catch(() => setOverview(null));
   }, [propertyId]);
 
   const propertyMeta = enrichedProperties.find((p) => p.propertyId === propertyId);
@@ -176,6 +178,7 @@ export function PropertyDetailPage() {
           </Stack>
         </Box>
         <Stack direction="row" spacing={1}>
+          <Button variant="outlined" startIcon={<Edit />} component={RouterLink} to={workspacePath(`/individual-dashboard/properties/${propertyId}/edit`)}>Edit</Button>
           <Button variant="outlined" onClick={() => window.open(individualWorkspaceService.getReportUrl('property-performance', 'pdf'), '_blank')}>Export PDF</Button>
           <Button variant="contained" component={RouterLink} to={workspacePath(`/individual-dashboard/rent-collection?propertyId=${propertyId}`)} sx={{ bgcolor: INDIVIDUAL_THEME.primary }}>Record Rent</Button>
         </Stack>
@@ -201,14 +204,31 @@ export function PropertyDetailPage() {
                 <Stack spacing={1.5}>
                   {[
                     ['Property', property.name],
+                    ['Address', [property.address, property.city, property.locationCountry].filter(Boolean).join(', ') || '—'],
+                    ['Type', property.type || '—'],
+                    ['Status', property.status || '—'],
+                    ['Bedrooms', property.bedrooms ?? '—'],
+                    ['Bathrooms', property.bathrooms ?? '—'],
+                    ['Parking', property.parkingSpaces ?? '—'],
+                    ['Floor area', property.area ?? '—'],
                     ['Occupancy Status', occupancyStatus],
                     ['Tenant', tenantName],
                     ['Lease Period', leasePeriod],
                     ['Lease Status', leaseStatusLabel],
                     ['Lease Expiry', leaseEndDate ? formatDate(leaseEndDate) : '—'],
-                    ['Monthly Rent', money(property.rent || propertyMeta?.monthlyRent || 0)],
-                    ['Outstanding Rent', money(propertyMeta?.outstandingRent || 0)],
-                    ['Outstanding Bills', money(propertyMeta?.outstandingBills || 0)],
+                    ['Currency', overview?.currency || property.operatingCurrency || 'USD'],
+                    ['Monthly Rental', money(overview?.monthlyRental ?? property.rent ?? propertyMeta?.monthlyRent ?? 0, overview?.currency || property.operatingCurrency || 'USD')],
+                    ['Rent frequency', property.rentFrequency || 'Monthly'],
+                    ['Rent effective', property.rentEffectiveFrom ? formatDate(property.rentEffectiveFrom) : 'Current'],
+                    ['Rent Collected', money(overview?.rentCollected ?? propertyMeta?.collectedRent ?? 0, overview?.currency || 'USD')],
+                    ['Outstanding Rent', money(overview?.outstandingRent ?? propertyMeta?.outstandingRent ?? 0, overview?.currency || 'USD')],
+                    ['Outstanding Levies', money(overview?.outstandingLevies || 0, overview?.currency || 'USD')],
+                    ['Municipal Charges', money(overview?.municipalCharges || 0, overview?.currency || 'USD')],
+                    ['Utilities', money(overview?.utilities || 0, overview?.currency || 'USD')],
+                    ['Insurance', money(overview?.insurance || 0, overview?.currency || 'USD')],
+                    ['Total Outstanding Bills', money(overview?.totalOutstandingBills ?? propertyMeta?.outstandingBills ?? 0, overview?.currency || 'USD')],
+                    ['Monthly Expenses', money(overview?.monthlyExpenses ?? 0, overview?.currency || 'USD')],
+                    ['Net Operating Income', money(overview?.netOperatingIncome ?? 0, overview?.currency || 'USD')],
                     ['Maintenance', propertyMaintenance.length ? `${propertyMaintenance.length} request(s)` : 'None open']
                   ].map(([label, val]) => (
                     <Box key={String(label)} sx={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -216,6 +236,21 @@ export function PropertyDetailPage() {
                       <Typography fontWeight={600}>{val}</Typography>
                     </Box>
                   ))}
+                </Stack>
+                {Array.isArray(property.recurringCharges) && property.recurringCharges.some((charge: any) => charge.active !== false) && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography fontWeight={700}>Configured charges</Typography>
+                    {property.recurringCharges.filter((charge: any) => charge.active !== false).map((charge: any) => (
+                      <Typography key={charge.chargeId} variant="body2" color="text.secondary">
+                        {charge.description}: {money(charge.amount, charge.currency)} · {charge.frequency}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                {overview?.mixedCurrency && <Alert severity="warning" sx={{ mt: 2 }}>This property has transactions in another currency. Those amounts were not added into these totals.</Alert>}
+                <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                  <Button size="small" component={RouterLink} to={workspacePath(`/individual-dashboard/bills`)}>Bills & Levies</Button>
+                  <Button size="small" component={RouterLink} to={workspacePath(`/individual-dashboard/expenses?propertyId=${propertyId}`)}>Expenses</Button>
                 </Stack>
               </Grid>
               <Grid item xs={12} md={6}>

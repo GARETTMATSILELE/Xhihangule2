@@ -4,6 +4,7 @@ import { User } from '../../models/User';
 import { CommunicationPreference, NotificationDelivery } from '../models/commsAndPayments';
 import { TEMPLATE_KEYS, TemplateKey, NotificationChannel } from '../constants';
 import { isChannelGloballyEnabled } from '../flags';
+import { individualChannelDecision } from '../../services/individualJurisdiction/operations';
 import { logger } from '../../utils/logger';
 
 export interface EmailProvider {
@@ -42,6 +43,12 @@ const TEMPLATES: Record<TemplateKey, { title: string; body: string; sms?: string
   WORK_COMPLETED: { title: 'Work marked completed', body: 'Maintenance at {{propertyName}} was marked completed.' },
   MAINTENANCE_REOPENED: { title: 'Maintenance reopened', body: 'A tenant reported a problem with completed work at {{propertyName}}.' },
   BROADCAST_MESSAGE: { title: '{{title}}', body: '{{message}}' },
+  LEASE_EXPIRING: { title: 'Lease expiring', body: 'The lease for {{propertyName}} ends on {{date}}.' },
+  INSPECTION_DUE: { title: 'Inspection due', body: 'An inspection is due for {{propertyName}}.' },
+  MUNICIPAL_BILL_DUE: { title: 'Municipal bill due', body: 'A municipal bill of {{amount}} was recorded for {{propertyName}}.' },
+  EXPENSE_ADDED: { title: 'Expense added', body: '{{description}} of {{amount}} was recorded for {{propertyName}}.' },
+  TENANT_ADDED: { title: 'Tenant added', body: '{{tenantName}} was added.' },
+  MAINTENANCE_COMPLETED: { title: 'Maintenance completed', body: 'Maintenance at {{propertyName}} was marked completed.' },
 };
 
 function render(template: string, vars: Record<string, string>): string {
@@ -177,8 +184,10 @@ export async function notifyEvent(input: {
       await NotificationDelivery.deleteOne({ _id: existing._id });
     }
 
-    const available =
-      channel === 'IN_APP'
+    const eventDecision = individualChannelDecision((prefs as any)?.individualEvents, eventType, channel);
+    const available = eventDecision === 'skip'
+      ? false
+      : channel === 'IN_APP'
         ? prefs?.inAppAvailable !== false
         : channel === 'EMAIL'
           ? (prefs?.emailAvailable !== false && (operational ? prefs?.emailOperational !== false : prefs?.emailMarketing))
@@ -196,7 +205,7 @@ export async function notifyEvent(input: {
         channel,
         status: 'SKIPPED',
         idempotencyKey: key,
-        failureReason: !globallyOn ? 'channel_unconfigured' : 'preference_or_unavailable',
+        failureReason: eventDecision === 'skip' ? 'preference_disabled' : !globallyOn ? 'channel_unconfigured' : 'preference_or_unavailable',
       });
       continue;
     }

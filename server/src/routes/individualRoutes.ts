@@ -12,6 +12,9 @@ import { listTaxRules } from '../services/taxRuleRegistry';
 import { listTaxPeriods, openTaxPeriod, updateTaxPeriodStatus } from '../services/taxPeriodService';
 import { TAX_PERIOD_TAX_TYPES, type TaxPeriodStatus, type TaxPeriodTaxType } from '../services/tax/taxMetadataTypes';
 import { AppError } from '../middleware/errorHandler';
+import { estimateIndividualTaxes } from '../services/individualJurisdiction/estimateService';
+import { getIndividualNotificationPreferences, saveIndividualNotificationPreferences, scanIndividualOwnerNotices } from '../services/individualJurisdiction/notificationPreferences';
+import { getIndividualPropertyEditor, listIndividualRecurringCharges, updateIndividualProperty } from '../services/individualPropertyEditService';
 
 const router = Router();
 
@@ -74,9 +77,21 @@ async function requireIndividualWorkspace(req: Request, _res: Response, next: Ne
 router.use(auth);
 router.use(requireIndividualWorkspace);
 
+function summaryOptions(req: Request) {
+  const start = typeof req.query.start === 'string' ? req.query.start : undefined;
+  const end = typeof req.query.end === 'string' ? req.query.end : undefined;
+  const propertyId = typeof req.query.propertyId === 'string' && req.query.propertyId ? req.query.propertyId : undefined;
+  const timeZone = req.query.timeZone === 'account' ? 'account' as const : undefined;
+  const includeComparison = req.query.compare === '1';
+  const includeSeries = req.query.series === '1';
+  if (!start && !end && !propertyId && !timeZone && !includeComparison && !includeSeries) return undefined;
+  return { start, end, propertyId, timeZone, includeComparison, includeSeries };
+}
+
 router.get('/dashboard', asyncHandler(async (req, res) => {
   try {
-    const data = await individualWorkspaceService.getSummary(req.user!.companyId!, String(req.query.period || 'this_month'));
+    const data = await individualWorkspaceService.getSummary(req.user!.companyId!, String(req.query.period || 'this_month'), summaryOptions(req));
+    scanIndividualOwnerNotices(req.user!.companyId!, req.user!.userId).catch(() => undefined);
     res.json({ status: 'success', data });
   } catch (error) {
     if (!isNotFoundError(error)) throw error;
@@ -86,7 +101,7 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
 
 router.get('/accounting', asyncHandler(async (req, res) => {
   try {
-    const data = await individualWorkspaceService.getAccounting(req.user!.companyId!, String(req.query.period || 'this_month'));
+    const data = await individualWorkspaceService.getAccounting(req.user!.companyId!, String(req.query.period || 'this_month'), summaryOptions(req));
     res.json({ status: 'success', data });
   } catch (error) {
     if (!isNotFoundError(error)) throw error;
@@ -107,6 +122,21 @@ router.get('/accounting', asyncHandler(async (req, res) => {
       warning: 'Some legacy property accounting data is not initialized yet.'
     });
   }
+}));
+
+router.get('/property-charges', asyncHandler(async (req, res) => {
+  const data = await listIndividualRecurringCharges(req.user!.companyId!);
+  res.json({ status: 'success', data });
+}));
+
+router.get('/properties/:propertyId/editor', asyncHandler(async (req, res) => {
+  const data = await getIndividualPropertyEditor(req.user!.companyId!, req.params.propertyId);
+  res.json({ status: 'success', data });
+}));
+
+router.put('/properties/:propertyId/editor', asyncHandler(async (req, res) => {
+  const data = await updateIndividualProperty(req.user!.companyId!, req.params.propertyId, req.body || {});
+  res.json({ status: 'success', data });
 }));
 
 router.get('/properties/:propertyId/ledger', asyncHandler(async (req, res) => {
@@ -205,6 +235,31 @@ router.post('/maintenance/:id/record-expense', asyncHandler(async (req, res) => 
     req.body,
     req.get('Idempotency-Key') || undefined
   );
+  res.json({ status: 'success', data });
+}));
+
+router.get('/properties/:id/financial-overview', asyncHandler(async (req, res) => {
+  const data = await individualWorkspaceService.getPropertyFinancialOverview(req.user!.companyId!, req.params.id);
+  res.json({ status: 'success', data });
+}));
+
+router.post('/bills/:propertyId/:transactionId/pay', asyncHandler(async (req, res) => {
+  const data = await individualAccountingService.settleObligation(req.user!.companyId!, req.params.transactionId);
+  res.json({ status: 'success', data });
+}));
+
+router.get('/notification-preferences', asyncHandler(async (req, res) => {
+  const data = await getIndividualNotificationPreferences(req.user!.userId);
+  res.json({ status: 'success', data });
+}));
+
+router.put('/notification-preferences', asyncHandler(async (req, res) => {
+  const data = await saveIndividualNotificationPreferences(req.user!.userId, req.body?.events || req.body || {});
+  res.json({ status: 'success', data });
+}));
+
+router.post('/tax/estimate', asyncHandler(async (req, res) => {
+  const data = await estimateIndividualTaxes(req.user!.companyId!, req.body || {});
   res.json({ status: 'success', data });
 }));
 
@@ -672,7 +727,14 @@ router.get('/reports/:reportType', asyncHandler(async (req, res) => {
     taxPeriodKey: typeof req.query.taxPeriodKey === 'string' ? req.query.taxPeriodKey : undefined,
     taxTreatment: typeof req.query.taxTreatment === 'string' ? req.query.taxTreatment : undefined,
     taxCalculationStatus: typeof req.query.taxCalculationStatus === 'string' ? req.query.taxCalculationStatus : undefined,
-    taxType: typeof req.query.taxType === 'string' ? req.query.taxType : undefined
+    taxType: typeof req.query.taxType === 'string' ? req.query.taxType : undefined,
+    period: typeof req.query.period === 'string' ? req.query.period : undefined,
+    start: typeof req.query.start === 'string' ? req.query.start : undefined,
+    end: typeof req.query.end === 'string' ? req.query.end : undefined,
+    propertyId: typeof req.query.propertyId === 'string' && req.query.propertyId ? req.query.propertyId : undefined,
+    category: typeof req.query.category === 'string' ? req.query.category : undefined,
+    timeZone: req.query.timeZone === 'account' ? 'account' : undefined,
+    reportKey: typeof req.query.reportKey === 'string' ? req.query.reportKey : undefined
   });
   if (result.contentType === 'application/json') {
     res.json({ status: 'success', data: result.body });

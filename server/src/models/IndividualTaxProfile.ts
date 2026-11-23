@@ -14,6 +14,13 @@ export interface IIndividualTaxProfile extends Document {
   rentalTaxRegime: RentalTaxRegime;
   rentalTaxRegistrationDate?: Date | null;
   taxResidence?: string;
+  countryOfResidence?: string;
+  taxResidencyCountry?: string;
+  preferredCurrency?: string;
+  taxJurisdiction?: 'ZW' | 'ZA' | 'GLOBAL';
+  enabledTaxes?: string[];
+  saProfile?: Record<string, unknown>;
+  globalTaxes?: Array<Record<string, unknown>>;
   taxYearStartMonth: number;
   accountantName?: string;
   accountantContact?: string;
@@ -36,6 +43,13 @@ const IndividualTaxProfileSchema = new Schema<IIndividualTaxProfile>(
     rentalTaxRegime: { type: String, enum: RENTAL_TAX_REGIMES, default: 'ACCOUNTANT_REVIEW', index: true },
     rentalTaxRegistrationDate: { type: Date, required: false, default: null },
     taxResidence: { type: String, trim: true, required: false, default: 'ZW' },
+    countryOfResidence: { type: String, trim: true, required: false },
+    taxResidencyCountry: { type: String, trim: true, required: false },
+    preferredCurrency: { type: String, trim: true, required: false, default: 'USD' },
+    taxJurisdiction: { type: String, enum: ['ZW', 'ZA', 'GLOBAL'], required: false, default: 'ZW' },
+    enabledTaxes: { type: [String], required: false, default: undefined },
+    saProfile: { type: Schema.Types.Mixed, required: false, default: undefined },
+    globalTaxes: { type: [Schema.Types.Mixed], required: false, default: undefined },
     taxYearStartMonth: { type: Number, min: 1, max: 12, default: 1 },
     accountantName: { type: String, trim: true, required: false },
     accountantContact: { type: String, trim: true, required: false },

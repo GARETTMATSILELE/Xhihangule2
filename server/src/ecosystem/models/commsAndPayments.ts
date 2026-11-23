@@ -14,6 +14,7 @@ export interface ICommunicationPreference extends Document {
   whatsappMarketing: boolean;
   phone?: string;
   whatsappNumber?: string;
+  individualEvents?: Record<string, { email?: boolean; inApp?: boolean }>;
   updatedAt: Date;
 }
 
@@ -32,6 +33,7 @@ const CommunicationPreferenceSchema = new Schema<ICommunicationPreference>(
     whatsappMarketing: { type: Boolean, default: false },
     phone: { type: String },
     whatsappNumber: { type: String },
+    individualEvents: { type: Schema.Types.Mixed, required: false },
   },
   { timestamps: true, collection: 'communication_preferences' }
 );

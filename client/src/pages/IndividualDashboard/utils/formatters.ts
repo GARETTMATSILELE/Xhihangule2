@@ -13,9 +13,9 @@ export function greetingName(firstName?: string, lastName?: string) {
 
 export function timeGreeting() {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good Morning';
-  if (hour < 17) return 'Good Afternoon';
-  return 'Good Evening';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 export function daysUntil(date: string | Date | undefined) {

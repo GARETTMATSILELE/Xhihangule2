@@ -10,7 +10,8 @@ import {
   Stack,
   Typography
 } from '@mui/material';
-import { AttachMoney, Notifications as NotificationsIcon } from '@mui/icons-material';
+import { AttachMoney, Menu as MenuIcon, Notifications as NotificationsIcon } from '@mui/icons-material';
+import { useChrome } from './chrome';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../contexts/AuthContext';
 import { isDemoMode, notifyDemoBlocked, workspacePath } from '../../../demo/demoMode';
@@ -35,6 +36,7 @@ const priorityDot: Record<string, string> = {
 export function TopBar({ companyName, actionItems }: { companyName?: string; actionItems: ActionItem[] }) {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const { openNav } = useChrome();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const demo = isDemoMode();
 
@@ -50,7 +52,7 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
   );
 
   return (
-    <Box sx={{
+    <Box className="individual-topbar" sx={{
       minHeight: 64,
       px: { xs: 1.5, sm: 3 },
       display: 'flex',
@@ -61,7 +63,12 @@ export function TopBar({ companyName, actionItems }: { companyName?: string; act
       background: INDIVIDUAL_THEME.surface,
       borderBottom: `1px solid ${INDIVIDUAL_THEME.border}`
     }}>
-      <Typography variant="h6" noWrap sx={{ fontWeight: 600, color: '#111827', minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis' }}>{companyName || 'My Portfolio'}</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: '1 1 auto' }}>
+        <IconButton aria-label="Open navigation" onClick={openNav} sx={{ width: 44, height: 44, display: 'inline-flex', '@media (min-width:1024px)': { display: 'none' } }}>
+          <MenuIcon />
+        </IconButton>
+        <Typography variant="h6" noWrap sx={{ fontWeight: 650, color: '#1B2420', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{companyName || 'My Portfolio'}</Typography>
+      </Box>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
         <Button
           variant="contained"

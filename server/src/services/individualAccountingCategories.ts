@@ -21,6 +21,8 @@ export const LEGACY_EXPENSE_CATEGORIES = [
   'Repairs',
   'Utilities',
   'Legal',
+  'Municipal Rates',
+  'Property Management',
   'Other'
 ] as const;
 
@@ -88,6 +90,8 @@ const LEGACY_EXPENSE_MAP: Record<string, string> = {
   Repairs: 'REPAIRS',
   Utilities: 'UTILITIES',
   Legal: 'LEGAL',
+  'Municipal Rates': 'MUNICIPAL_RATES',
+  'Property Management': 'PROPERTY_MANAGEMENT',
   Other: 'OTHER_PROPERTY_EXPENSE'
 };
 

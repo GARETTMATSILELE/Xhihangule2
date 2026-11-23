@@ -119,7 +119,7 @@ function world(label) {
 }
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
         if (/cosmos|azure|mantisafrica/i.test(TEST_DB) || mongoose_1.default.connection.readyState !== 0)
             process.exit(1);
         env();
@@ -145,7 +145,7 @@ function main() {
         try {
             verified = (0, dodoWebhookService_1.verifyDodoWebhook)(payload, headers).type === 'payment.processing';
         }
-        catch (_h) {
+        catch (_l) {
             verified = false;
         }
         check(verified, 'a valid Dodo signature is accepted by the official SDK');
@@ -266,6 +266,114 @@ function main() {
         check(((_f = (yield Subscription_1.Subscription.findById(paynowSubscription._id))) === null || _f === void 0 ? void 0 : _f.status) === 'active' && ((_g = (yield Subscription_1.Subscription.findById(paynowSubscription._id))) === null || _g === void 0 ? void 0 : _g.provider) === 'paynow', 'existing Paynow activation still completes');
         check(typeof paynowCallbackService_1.processVerifiedPaynowEvent === 'function', 'the Paynow webhook processor is still available');
         check((yield mongoose_1.default.connection.collection('payments').countDocuments()) === 0, 'subscription checkout does not create rental payments');
+        (0, dodoClient_1.setDodoGatewayForTests)(real);
+        const exampleProcessing = {
+            business_id: 'bus_P3SXLcppjXgagmHS',
+            data: {
+                billing: { city: 'New York', country: 'US', state: 'New York', street: 'New York, New York', zipcode: ' ' },
+                brand_id: 'bus_P3SXLcppjXgagmHSVaH3N',
+                business_id: 'bus_P3SXLcppjXgagmHS',
+                card_holder_name: 'John Doe',
+                card_issuing_country: 'US',
+                card_last_four: '0119',
+                card_network: 'VISA',
+                card_type: 'CREDIT',
+                checkout_session_id: 'cks_stst1231',
+                created_at: '2025-08-04T05:30:31.152232Z',
+                currency: 'USD',
+                customer: { customer_id: 'cus_8VbC6JDZzPEqfB', email: 'test@acme.com', metadata: {}, name: 'Test user', phone_number: '+15555550100' },
+                payment_id: 'pay_2IjeQm4hqU6RA4Z4kwDee',
+                payment_method: 'card',
+                payment_provider: 'dodo',
+                status: 'processing',
+                total_amount: 400
+            },
+            timestamp: '2025-08-04T05:36:41.609359Z',
+            type: 'payment.processing'
+        };
+        const exampleBody = JSON.stringify(exampleProcessing);
+        const signBody = (id, body) => {
+            const signedAt = new Date();
+            return {
+                'webhook-id': id,
+                'webhook-signature': webhook.sign(id, signedAt, body),
+                'webhook-timestamp': String(Math.floor(signedAt.getTime() / 1000))
+            };
+        };
+        const postWebhook = (body, headers) => __awaiter(this, void 0, void 0, function* () {
+            let status = 0;
+            let json = {};
+            yield (0, dodoWebhookController_1.handleDodoWebhook)({ body: Buffer.from(body), headers }, {
+                status(code) { status = code; return { json(payload) { json = payload || {}; } }; }
+            });
+            return { status, json };
+        });
+        const exampleId = 'msg_payment_processing_example';
+        const rentalBefore = yield mongoose_1.default.connection.collection('payments').countDocuments();
+        const journalsBefore = yield mongoose_1.default.connection.collection('journalentries').countDocuments();
+        const activeBefore = yield Subscription_1.Subscription.countDocuments({ status: 'active' });
+        const paidBeforeExample = yield BillingPayment_1.BillingPayment.countDocuments({ status: 'paid' });
+        const accepted = yield postWebhook(exampleBody, signBody(exampleId, exampleBody));
+        const exampleReceipt = yield WebhookEventReceipt_1.WebhookEventReceipt.findOne({ provider: 'dodo', eventId: exampleId });
+        check(accepted.status === 200 && accepted.json.status === 'received' && accepted.json.activated === false, 'a signed payment.processing example is acknowledged');
+        check((exampleReceipt === null || exampleReceipt === void 0 ? void 0 : exampleReceipt.status) === 'processed', 'the payment.processing example is recorded once');
+        check((yield PaymentSession_1.PaymentSession.countDocuments({ $or: [{ providerTransactionId: 'pay_2IjeQm4hqU6RA4Z4kwDee' }, { 'metadata.dodoCheckoutSessionId': 'cks_stst1231' }] })) === 0, 'the example checkout and payment do not match a Mantis session');
+        check((yield BillingPayment_1.BillingPayment.countDocuments({ providerTransactionId: 'pay_2IjeQm4hqU6RA4Z4kwDee', status: 'paid' })) === 0 && (yield BillingPayment_1.BillingPayment.countDocuments({ status: 'paid' })) === paidBeforeExample, 'the example does not mark a billing payment paid');
+        check((yield Subscription_1.Subscription.countDocuments({ status: 'active' })) === activeBefore && (yield User_1.User.countDocuments({ email: 'test@acme.com' })) === 0, 'the example does not activate a subscription');
+        check((yield mongoose_1.default.connection.collection('payments').countDocuments()) === rentalBefore && (yield mongoose_1.default.connection.collection('journalentries').countDocuments()) === journalsBefore, 'the example does not create a rental payment or journal');
+        const repeated = yield postWebhook(exampleBody, signBody(exampleId, exampleBody));
+        check(repeated.status === 200 && repeated.json.status === 'duplicate' && (yield WebhookEventReceipt_1.WebhookEventReceipt.countDocuments({ provider: 'dodo', eventId: exampleId })) === 1, 'the same payment.processing delivery is not processed twice');
+        const missing = yield postWebhook(exampleBody, {});
+        check(missing.status === 401, 'a missing signature returns HTTP 401');
+        const invalid = yield postWebhook(exampleBody, Object.assign(Object.assign({}, signBody('msg_processing_invalid', exampleBody)), { 'webhook-signature': 'v1,invalid' }));
+        check(invalid.status === 401, 'an invalid signature returns HTTP 401');
+        const tampered = exampleBody.replace('"total_amount":400', '"total_amount":1');
+        const tamperedHeaders = signBody('msg_processing_tampered', exampleBody);
+        const modified = yield postWebhook(tampered, tamperedHeaders);
+        check(modified.status === 401 && (yield WebhookEventReceipt_1.WebhookEventReceipt.countDocuments({ eventId: 'msg_processing_tampered' })) === 0, 'a payload modified after signing returns HTTP 401');
+        const unknownSigned = JSON.stringify({ business_id: 'bus_test', type: 'license_key.created', timestamp: new Date().toISOString(), data: {} });
+        const unknownRouted = yield postWebhook(unknownSigned, signBody('msg_processing_unknown_event', unknownSigned));
+        check(unknownRouted.status === 200 && unknownRouted.json.status === 'ignored' && unknownRouted.json.activated === false, 'an unknown signed event is ignored');
+        const savedWebhookKey = process.env.DODO_PAYMENTS_WEBHOOK_KEY;
+        delete process.env.DODO_PAYMENTS_WEBHOOK_KEY;
+        const unconfigured = yield postWebhook(exampleBody, signBody('msg_processing_unconfigured', exampleBody));
+        process.env.DODO_PAYMENTS_WEBHOOK_KEY = savedWebhookKey;
+        check(unconfigured.status === 503, 'a missing webhook configuration returns HTTP 503');
+        const safety = yield world('processing-safety');
+        fakeGateway();
+        const safetyStart = yield (0, subscriptionCheckoutService_1.startDodoSubscriptionCheckout)(requestFor(safety.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+        const safetySessionId = String(safetyStart.body.paymentSessionId);
+        const safetySessionBefore = yield PaymentSession_1.PaymentSession.findById(safetySessionId);
+        (0, dodoClient_1.setDodoGatewayForTests)(real);
+        const safetyBody = JSON.stringify({
+            business_id: 'bus_test',
+            type: 'payment.processing',
+            timestamp: new Date().toISOString(),
+            data: { payment_id: 'pay_safety_processing', currency: 'USD', total_amount: 1900, status: 'processing', metadata: { mantis_payment_session_id: safetySessionId } }
+        });
+        const safetyProcessing = yield postWebhook(safetyBody, signBody('msg_safety_processing', safetyBody));
+        const safetySessionAfter = yield PaymentSession_1.PaymentSession.findById(safetySessionId);
+        check(safetyProcessing.status === 200 && safetyProcessing.json.activated === false && (safetySessionAfter === null || safetySessionAfter === void 0 ? void 0 : safetySessionAfter.status) === (safetySessionBefore === null || safetySessionBefore === void 0 ? void 0 : safetySessionBefore.status) && (yield Subscription_1.Subscription.countDocuments({ companyId: safety.company._id, status: 'active' })) === 0 && ((_h = (yield BillingPayment_1.BillingPayment.findOne({ paymentSessionId: safetySessionId }))) === null || _h === void 0 ? void 0 : _h.status) === 'pending', 'payment.processing leaves a pending checkout inactive');
+        const safetyPaid = yield paidEvent(safetySessionId, 'pay_safety_succeeded');
+        const safetyActive = yield Subscription_1.Subscription.findOne({ companyId: safety.company._id, status: 'active' });
+        const periodEnd = (_j = safetyActive === null || safetyActive === void 0 ? void 0 : safetyActive.currentPeriodEnd) === null || _j === void 0 ? void 0 : _j.toISOString();
+        const extendBody = JSON.stringify({
+            business_id: 'bus_test',
+            type: 'payment.processing',
+            timestamp: new Date().toISOString(),
+            data: { payment_id: 'pay_safety_extend', currency: 'USD', total_amount: 1900, status: 'processing', metadata: { mantis_payment_session_id: safetySessionId, mantis_subscription_id: String(safetyActive === null || safetyActive === void 0 ? void 0 : safetyActive._id) } }
+        });
+        const extend = yield postWebhook(extendBody, signBody('msg_safety_extend', extendBody));
+        const safetyAfterExtend = yield Subscription_1.Subscription.findById(safetyActive === null || safetyActive === void 0 ? void 0 : safetyActive._id);
+        check(safetyPaid.body.activated === true && extend.status === 200 && extend.json.activated === false && (safetyAfterExtend === null || safetyAfterExtend === void 0 ? void 0 : safetyAfterExtend.status) === 'active' && ((_k = safetyAfterExtend.currentPeriodEnd) === null || _k === void 0 ? void 0 : _k.toISOString()) === periodEnd && (yield BillingPayment_1.BillingPayment.countDocuments({ companyId: safety.company._id, status: 'paid' })) === 1, 'payment.processing does not extend an active subscription');
+        const unrelatedBody = JSON.stringify({
+            business_id: 'bus_P3SXLcppjXgagmHS',
+            type: 'payment.succeeded',
+            timestamp: '2025-08-04T05:36:41.609359Z',
+            data: Object.assign(Object.assign({}, exampleProcessing.data), { status: 'succeeded' })
+        });
+        const unrelated = yield postWebhook(unrelatedBody, signBody('msg_unrelated_succeeded', unrelatedBody));
+        check(unrelated.status === 500 && unrelated.json.activated === false && (yield Subscription_1.Subscription.countDocuments({ status: 'active' })) === activeBefore + 1, 'an unrelated Dodo payment cannot activate a Mantis account');
         const webhookSource = fs_1.default.readFileSync(path_1.default.join(__dirname, '../services/subscriptionPayments/dodoWebhookService.ts'), 'utf8');
         check(!webhookSource.includes('postPaymentAccounting') && !webhookSource.includes('JournalEntry') && !webhookSource.includes("models/Payment'"), 'Dodo processing does not enter rental accounting');
         if (failures.length) {

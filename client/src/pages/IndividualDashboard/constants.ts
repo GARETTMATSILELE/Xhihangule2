@@ -1,20 +1,20 @@
 import {
-  AccountBalance,
-  Assessment,
-  Build,
-  Dashboard,
-  Description,
-  FactCheck,
-  Folder,
-  HomeWork,
-  People,
-  Receipt,
-  Settings,
+  AccountBalanceOutlined,
+  ApartmentOutlined,
+  BuildOutlined,
+  DescriptionOutlined,
+  FactCheckOutlined,
+  FolderOutlined,
+  HomeOutlined,
+  InsightsOutlined,
+  PeopleOutline,
+  ReceiptLongOutlined,
+  SettingsOutlined,
   TrendingDown
 } from '@mui/icons-material';
 import React from 'react';
 
-export const drawerWidth = 280;
+export const drawerWidth = 240;
 
 export type NavItem = {
   text: string;
@@ -30,39 +30,35 @@ export type NavSection = {
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: '',
-    items: [{ text: 'Dashboard', icon: React.createElement(Dashboard), path: '/individual-dashboard' }]
-  },
-  {
-    title: 'Properties',
     items: [
-      { text: 'Properties', icon: React.createElement(HomeWork), path: '/individual-dashboard/properties' },
-      { text: 'Tenants', icon: React.createElement(People), path: '/individual-dashboard/tenants' },
-      { text: 'Leases', icon: React.createElement(Description), path: '/individual-dashboard/leases' },
-      { text: 'Inspections', icon: React.createElement(FactCheck), path: '/individual-dashboard/inspections' },
-      { text: 'Maintenance', icon: React.createElement(Build), path: '/individual-dashboard/maintenance' },
-      { text: 'Files', icon: React.createElement(Folder), path: '/individual-dashboard/files' }
+      { text: 'Dashboard', icon: React.createElement(HomeOutlined), path: '/individual-dashboard' },
+      { text: 'Properties', icon: React.createElement(ApartmentOutlined), path: '/individual-dashboard/properties' },
+      { text: 'Tenants', icon: React.createElement(PeopleOutline), path: '/individual-dashboard/tenants' },
+      { text: 'Leases', icon: React.createElement(DescriptionOutlined), path: '/individual-dashboard/leases' },
+      { text: 'Inspections', icon: React.createElement(FactCheckOutlined), path: '/individual-dashboard/inspections' },
+      { text: 'Maintenance', icon: React.createElement(BuildOutlined), path: '/individual-dashboard/maintenance' },
+      { text: 'Files', icon: React.createElement(FolderOutlined), path: '/individual-dashboard/files' }
     ]
   },
   {
     title: 'Finance',
     items: [
-      { text: 'Rent Collection', icon: React.createElement(Receipt), path: '/individual-dashboard/rent-collection' },
+      { text: 'Rent Collection', icon: React.createElement(ReceiptLongOutlined), path: '/individual-dashboard/rent-collection' },
       { text: 'Expenses', icon: React.createElement(TrendingDown), path: '/individual-dashboard/expenses' },
-      { text: 'Bills & Levies', icon: React.createElement(Description), path: '/individual-dashboard/bills' },
-      { text: 'Accounting', icon: React.createElement(AccountBalance), path: '/individual-dashboard/accounting' },
-      { text: 'VAT', icon: React.createElement(Receipt), path: '/individual-dashboard/tax/vat' },
-      { text: 'Rental Tax', icon: React.createElement(AccountBalance), path: '/individual-dashboard/tax/rental' },
-      { text: 'Income Tax', icon: React.createElement(Assessment), path: '/individual-dashboard/tax/income' },
-      { text: 'Tax Compliance', icon: React.createElement(FactCheck), path: '/individual-dashboard/tax/compliance' }
-    ]
-  },
-  {
-    title: '',
-    items: [
-      { text: 'Reports', icon: React.createElement(Assessment), path: '/individual-dashboard/reports' },
-      { text: 'Settings', icon: React.createElement(Settings), path: '/individual-dashboard/settings' }
+      { text: 'Bills & Levies', icon: React.createElement(DescriptionOutlined), path: '/individual-dashboard/bills' },
+      { text: 'Accounting', icon: React.createElement(AccountBalanceOutlined), path: '/individual-dashboard/accounting' },
+      { text: 'Reports & Insights', icon: React.createElement(InsightsOutlined), path: '/individual-dashboard/reports' },
+      { text: 'Settings', icon: React.createElement(SettingsOutlined), path: '/individual-dashboard/settings' }
     ]
   }
+];
+
+/** Tax centres stay available from Reports. They are not primary navigation. */
+export const TAX_CENTRE_LINKS = [
+  ['tax/vat', 'VAT summary'],
+  ['tax/rental', 'Rental tax summary'],
+  ['tax/income', 'Income tax summary'],
+  ['tax/compliance', 'Tax Compliance']
 ];
 
 export function getNavSections(base = '/individual-dashboard'): NavSection[] {
@@ -76,11 +72,11 @@ export function getNavSections(base = '/individual-dashboard'): NavSection[] {
 }
 
 export const expenseCategories = [
-  'Maintenance', 'Municipal', 'Levies', 'Security', 'Insurance',
-  'Gardening', 'Cleaning', 'Repairs', 'Utilities', 'Legal', 'Other'
+  'Repairs', 'Maintenance', 'Utilities', 'Levies', 'Municipal Rates',
+  'Insurance', 'Security', 'Property Management', 'Other'
 ];
 
-export const billCategories = ['Municipal', 'Levies', 'Insurance', 'Utilities'] as const;
+export const billCategories = ['Municipal', 'Municipal Rates', 'Levies', 'Insurance', 'Utilities'] as const;
 
 export const billSubsections = [
   { key: 'Municipal', label: 'Municipal Bills' },
