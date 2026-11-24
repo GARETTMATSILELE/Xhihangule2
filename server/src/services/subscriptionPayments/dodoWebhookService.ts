@@ -374,7 +374,15 @@ export async function reconcileDodoPayment(paymentSessionId: string, companyId: 
   const session = await PaymentSession.findOne({ _id: paymentSessionId, companyId, provider: 'dodo' });
   if (!session) return { status: 404, body: { message: 'Checkout was not found.', code: 'PAYMENT_SESSION_NOT_FOUND' } };
   if (session.status === 'reconciled' || session.status === 'paid') {
-    return { status: 200, body: { status: session.status, activated: session.status === 'reconciled' } };
+    await activateSubscriptionFromPayment({
+      paymentSessionId: String(session._id),
+      provider: 'dodo',
+      providerRef: session.providerRef,
+      paidAt: session.paidAt || undefined,
+      rawProviderResponse: session.rawProviderResponse
+    });
+    const refreshed = await PaymentSession.findById(session._id).select('status');
+    return { status: 200, body: { status: refreshed?.status || session.status, activated: refreshed?.status === 'reconciled' } };
   }
   const paymentId = String(hintedPaymentId || (session.metadata as { dodoPaymentId?: string } | undefined)?.dodoPaymentId || '').trim();
   if (!paymentId) return { status: 200, body: { status: session.status, activated: false } };

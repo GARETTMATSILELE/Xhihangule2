@@ -218,3 +218,28 @@ export async function activateSubscriptionFromPayment(input: ActivationInput) {
 
   return { paymentSession, subscription, alreadyProcessed: false };
 }
+
+/**
+ * Finish subscription and company setup for a payment that is already paid or reconciled.
+ * Pending and provider-created sessions are left for an independent provider check.
+ */
+export async function resumeVerifiedRegistration(companyId: string): Promise<void> {
+  if (!companyId) return;
+  const company = await Company.findById(companyId).select('onboardingStatus');
+  if (!company) return;
+  const awaiting = AWAITING_REGISTRATION.includes(String(company.onboardingStatus || ''));
+  const sessions = await PaymentSession.find({
+    companyId,
+    provider: { $in: ['paynow', 'dodo', 'cash', 'manual'] },
+    status: awaiting ? { $in: ['paid', 'reconciled'] } : 'paid'
+  }).sort({ createdAt: -1 }).limit(3);
+  for (const session of sessions) {
+    await activateSubscriptionFromPayment({
+      paymentSessionId: String(session._id),
+      provider: session.provider as ActivationInput['provider'],
+      providerRef: session.providerRef,
+      paidAt: session.paidAt || undefined,
+      rawProviderResponse: session.rawProviderResponse
+    });
+  }
+}

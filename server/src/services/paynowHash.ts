@@ -107,6 +107,13 @@ export function parsePaynowBody(body: string): Record<string, string> {
   return query;
 }
 
+/** Paynow does not guarantee it will add the merchant reference to the browser return. */
+export function paynowReturnUrlForReference(returnUrl: string, reference: string): string {
+  const url = new URL(returnUrl);
+  url.searchParams.set('reference', reference);
+  return url.toString();
+}
+
 export function paynowInitiationLinks(fields: Record<string, string>): {
   status: string;
   browserUrl: string;

@@ -3,6 +3,9 @@ import { Company, ICompany } from '../models/Company';
 import { PLAN_CONFIG, Plan } from '../types/plan';
 import { PropertyOwner } from '../models/PropertyOwner';
 import { AppError } from '../middleware/errorHandler';
+import { companyProfileWrite, companyUpdateError } from '../services/companyProfileWrite';
+import { reconcilePaynowForCompany } from '../services/paynowRecoveryService';
+import { resumeVerifiedRegistration } from '../services/billingActivationService';
 import { JwtPayload } from '../types/auth';
 import mongoose from 'mongoose';
 import { updateChartMetrics } from './chartController';
@@ -306,7 +309,7 @@ export const rejectCompanyPlanChange = async (_req: Request, res: Response) => {
 export const updateCompany = async (req: Request, res: Response) => {
   try {
     assertCallerCompany(req, String(req.params.id || ''));
-    const existing = await Company.findById(req.params.id).select('tenantStatus onboardingStatus');
+    const existing = await Company.findById(req.params.id).select('tenantStatus onboardingStatus companyType');
     if (!existing) {
       throw new AppError('Company not found', 404);
     }
@@ -338,10 +341,11 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
     stripSubscriptionAuthority(updateData);
+    const write = companyProfileWrite(updateData as Record<string, unknown>, String((existing as any).companyType || ''));
 
     const company = await Company.findByIdAndUpdate(
       req.params.id,
-      { $set: updateData },
+      { ...(Object.keys(write.$set).length ? { $set: write.$set } : {}), ...(Object.keys(write.$unset).length ? { $unset: write.$unset } : {}) },
       { new: true, runValidators: true }
     );
 
@@ -354,7 +358,7 @@ export const updateCompany = async (req: Request, res: Response) => {
     if (error instanceof AppError) {
       throw error;
     }
-    throw new AppError('Error updating company', 500);
+    throw companyUpdateError(error);
   }
 };
 
@@ -449,6 +453,12 @@ export const getCurrentCompany = async (req: Request, res: Response) => {
       }
     }
 
+    if (company && ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP', 'PAYMENT_RECEIVED'].includes(String(company.onboardingStatus || ''))) {
+      await reconcilePaynowForCompany(String(company._id)).catch(() => undefined);
+      await resumeVerifiedRegistration(String(company._id)).catch(() => undefined);
+      company = await Company.findById(company._id);
+    }
+
     if (!company) {
       console.log('No company found for user:', {
         userId,
@@ -540,10 +550,11 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
     if (rentReceivableOpeningBalance !== undefined) (updateData as any).rentReceivableOpeningBalance = Number(rentReceivableOpeningBalance);
     if (levyReceivableOpeningBalance !== undefined) (updateData as any).levyReceivableOpeningBalance = Number(levyReceivableOpeningBalance);
     stripSubscriptionAuthority(updateData);
+    const write = companyProfileWrite(updateData as Record<string, unknown>, String((company as any).companyType || ''));
 
     const updatedCompany = await Company.findByIdAndUpdate(
       company._id,
-      { $set: updateData },
+      { ...(Object.keys(write.$set).length ? { $set: write.$set } : {}), ...(Object.keys(write.$unset).length ? { $unset: write.$unset } : {}) },
       { new: true, runValidators: true }
     );
 
@@ -557,7 +568,7 @@ export const updateCurrentCompany = async (req: Request, res: Response) => {
       throw error;
     }
     console.error('Error in updateCurrentCompany:', error);
-    throw new AppError('Error updating company', 500);
+    throw companyUpdateError(error);
   }
 };
 

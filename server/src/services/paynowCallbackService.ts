@@ -12,8 +12,8 @@ export type PaynowClaim =
   | { action: 'in_progress' };
 
 /**
- * Claim one Paynow callback. The unique { provider, eventId } index is the lock when it exists.
- * Startup does not create that index. A duplicate key without provider and eventId metadata is not
+ * Claim one Paynow callback. Startup creates the unique { provider, eventId } index when no
+ * duplicate receipts exist. A duplicate key without provider and eventId metadata is not
  * proof that this event was processed, and it does not activate a subscription.
  * A duplicate key is not payment success. Activation happens only after a paid,
  * matching poll is applied by the caller.

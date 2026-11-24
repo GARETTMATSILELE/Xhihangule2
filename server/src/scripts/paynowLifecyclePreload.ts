@@ -14,6 +14,8 @@ process.env.CLIENT_URL = 'https://payments.example.test';
 process.env.PAYNOW_MERCHANT_EMAIL = 'merchant@example.test';
 process.env.DASHBOARD_KPI_REFRESH_DEBOUNCE_MS = '600000';
 process.env.PAYNOW_DISABLE_LOCAL_CONFIG = '1';
+process.env.PAYNOW_CARD_ENABLED = 'true';
+process.env.PAYNOW_ECOCASH_ENABLED = 'true';
 
 export const PAYNOW_LIFECYCLE_POLL = 'https://www.paynow.co.zw/Interface/CheckPayment/?guid=lifecycle-test';
 
@@ -29,6 +31,8 @@ export const paynowTestDouble = {
     reference: string;
     email: string;
     amount: number;
+    phone?: string;
+    method?: string;
   },
   pollStatus: 'Created',
   pollAmount: '19.00',
@@ -82,6 +86,25 @@ function installStandIns() {
     constructor(public integrationId: string, public integrationKey: string) {}
     createPayment(reference: string, authEmail: string) {
       return new MockPayment(reference, authEmail);
+    }
+    async sendMobile(payment: MockPayment, phone: string, method: string) {
+      paynowTestDouble.sends += 1;
+      const amount = payment.items.reduce((sum, item) => sum + Number(item.amount), 0);
+      paynowTestDouble.last = {
+        integrationId: this.integrationId,
+        resultUrl: this.resultUrl,
+        returnUrl: this.returnUrl,
+        reference: payment.reference,
+        email: payment.authEmail,
+        amount,
+        phone,
+        method
+      };
+      return {
+        success: true,
+        pollUrl: PAYNOW_LIFECYCLE_POLL,
+        instructions: 'Dial the EcoCash prompt'
+      };
     }
     async send(payment: MockPayment) {
       paynowTestDouble.sends += 1;

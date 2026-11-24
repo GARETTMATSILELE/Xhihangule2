@@ -54,6 +54,7 @@ import { IndividualIncomeTaxPayment } from './IndividualIncomeTaxPayment';
 import { IndividualTaxEvidence } from './IndividualTaxEvidence';
 import { IndividualTaxComplianceReview } from './IndividualTaxComplianceReview';
 import { IndividualTaxPack } from './IndividualTaxPack';
+import { WebhookEventReceipt } from './WebhookEventReceipt';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -118,6 +119,26 @@ export const optimizePaymentQueries = {
   }
 };
 
+/**
+ * Create the webhook receipt lock only when no provider and eventId pair is repeated.
+ * Existing receipts are left in place. A unique providerRef index is not created here.
+ */
+export async function ensureWebhookEventReceiptIndex(): Promise<{ enforced: boolean; duplicateGroups: number }> {
+  const collection = WebhookEventReceipt.collection;
+  const groups = await collection.aggregate([
+    { $match: { provider: { $type: 'string' }, eventId: { $type: 'string' } } },
+    { $group: { _id: { provider: '$provider', eventId: '$eventId' }, n: { $sum: 1 } } },
+    { $match: { n: { $gt: 1 } } },
+    { $count: 'groups' }
+  ]).toArray();
+  const duplicateGroups = Number(groups[0]?.groups || 0);
+  if (duplicateGroups > 0) return { enforced: false, duplicateGroups };
+  await collection.createIndex({ provider: 1, eventId: 1 }, { unique: true, name: 'provider_1_eventId_1' });
+  const indexes = await collection.indexes();
+  const enforced = indexes.some((index) => index.unique === true && index.key?.provider === 1 && index.key?.eventId === 1);
+  return { enforced, duplicateGroups: 0 };
+}
+
 // Ensure indexes for all core models at startup.
 // This is critical in environments where autoIndex is disabled.
 export async function createIndexes() {
@@ -179,6 +200,7 @@ export async function createIndexes() {
       { model: IndividualTaxEvidence, name: 'IndividualTaxEvidence' },
       { model: IndividualTaxComplianceReview, name: 'IndividualTaxComplianceReview' },
       { model: IndividualTaxPack, name: 'IndividualTaxPack' },
+      { model: WebhookEventReceipt, name: 'WebhookEventReceipt' },
     ];
 
     for (const { model, name } of models) {
@@ -194,8 +216,23 @@ export async function createIndexes() {
 
       // Create indexes declared in schemas (does not drop existing indexes).
       // Avoid throwing hard on duplicate-key/index-conflict issues so the app can still boot.
+      let skipSchemaIndexes = false;
+      if (name === 'WebhookEventReceipt') {
+        try {
+          const receiptIndex = await ensureWebhookEventReceiptIndex();
+          skipSchemaIndexes = !receiptIndex.enforced;
+          if (skipSchemaIndexes) {
+            console.warn(
+              `WebhookEventReceipt unique index was not created because ${receiptIndex.duplicateGroups} duplicate provider and eventId groups exist. Concurrent callbacks stay on the application claim and do not activate a second subscription.`
+            );
+          }
+        } catch (receiptIndexError) {
+          skipSchemaIndexes = true;
+          console.warn('WebhookEventReceipt unique index was not created:', receiptIndexError);
+        }
+      }
       try {
-        await withTransientRetry(() => model.createIndexes());
+        if (!skipSchemaIndexes) await withTransientRetry(() => model.createIndexes());
       } catch (indexCreateErr: any) {
         const code = Number(indexCreateErr?.code);
         const message = String(indexCreateErr?.message || '');

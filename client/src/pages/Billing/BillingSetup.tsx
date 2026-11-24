@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, Container, Paper, Tab, Tabs, TextField, Typography } from '@mui/material';
-import { apiService } from '../../api';
+import api, { apiService } from '../../api';
 import PaynowBadge from '../../components/payments/PaynowBadge';
 
 type ProviderId = 'paynow' | 'dodo';
@@ -10,6 +10,7 @@ type ProviderOption = {
   testMode: boolean;
   cycles: Array<'monthly' | 'quarterly' | 'yearly'>;
   cardBrands: Array<'visa' | 'mastercard'>;
+  methods?: Array<{ id: string; label: string }>;
 };
 
 const BillingSetup: React.FC = () => {
@@ -17,6 +18,8 @@ const BillingSetup: React.FC = () => {
   const [plan, setPlan] = useState<'INDIVIDUAL'|'SME'|'ENTERPRISE'>('SME');
   const [cycle, setCycle] = useState<'monthly'|'quarterly'|'yearly'>('monthly');
   const [provider, setProvider] = useState<ProviderId | ''>('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [phone, setPhone] = useState('');
   const [providers, setProviders] = useState<ProviderOption[]>([]);
   const [code, setCode] = useState('');
   const [pin, setPin] = useState('');
@@ -25,7 +28,13 @@ const BillingSetup: React.FC = () => {
 
   useEffect(() => {
     apiService.getPaymentProviders()
-      .then(({ data }) => setProviders((data.providers || []).filter((item: ProviderOption) => item.available)))
+      .then(({ data }) => {
+        const available = (data.providers || []).filter((item: ProviderOption) => item.available);
+        setProviders(available);
+        setProvider((current) => current || available[0]?.id || '');
+        const methods = available[0]?.methods || [];
+        if (methods.length === 1) setPaymentMethod(methods[0].id);
+      })
       .catch(() => setMessage({ type: 'error', text: 'Payment methods could not be loaded.' }));
   }, []);
 
@@ -40,12 +49,30 @@ const BillingSetup: React.FC = () => {
     try {
       setLoading(true);
       setMessage(null);
-      const { data } = await apiService.createCheckout({ plan, cycle, provider });
-      if (!data.redirectUrl) {
-        setMessage({ type: 'error', text: 'Checkout did not return a payment page.' });
+      const { data } = await apiService.createCheckout({ plan, cycle, provider, paymentMethod: provider === 'paynow' ? paymentMethod : 'card', phone });
+      if (data.redirectUrl) {
+        window.location.href = data.redirectUrl;
         return;
       }
-      window.location.href = data.redirectUrl;
+      if (data.reference) {
+        setMessage({ type: 'info', text: data.instructions || 'Approve the EcoCash prompt. Mantis will confirm this payment. Do not pay again.' });
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000));
+          const confirmed = await api.post('/paynow/confirm', { reference: data.reference });
+          const state = String(confirmed.data?.paymentStatus || '').toLowerCase();
+          if (state === 'reconciled' || confirmed.data?.activated === true || state === 'paid') {
+            setMessage({ type: 'success', text: 'Payment confirmed. Your subscription is active.' });
+            return;
+          }
+          if (state === 'failed' || state === 'cancelled' || state === 'expired') {
+            setMessage({ type: 'error', text: 'EcoCash did not complete this payment. You have not been asked to pay again.' });
+            return;
+          }
+        }
+        setMessage({ type: 'info', text: 'EcoCash is still processing. You can leave this page. Mantis will finish activation when the payment is confirmed. Do not pay again.' });
+        return;
+      }
+      setMessage({ type: 'error', text: 'Checkout did not return a payment page.' });
     } catch (e: any) {
       setMessage({ type: 'error', text: e?.response?.data?.message || 'Failed to start checkout' });
     } finally {
@@ -84,6 +111,8 @@ const BillingSetup: React.FC = () => {
                 variant="outlined"
                 onClick={() => {
                   setProvider(item.id);
+                  const methods = item.methods || [];
+                  setPaymentMethod(methods.length === 1 ? methods[0].id : '');
                   if (!item.cycles.includes(cycle)) setCycle(item.cycles[0] || 'monthly');
                 }}
                 sx={{
@@ -96,8 +125,8 @@ const BillingSetup: React.FC = () => {
                 <Typography variant="subtitle1">{item.id === 'paynow' ? 'Paynow' : 'Dodo Payments'}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   {item.id === 'paynow'
-                    ? 'Pay using available local payment methods.'
-                    : 'Pay securely using international debit and credit cards.'}
+                    ? (item.methods?.map((entry) => entry.label).join(' · ') || 'EcoCash')
+                    : 'Visa and Mastercard'}
                 </Typography>
                 {item.id === 'dodo' && item.cardBrands.includes('visa') && item.cardBrands.includes('mastercard') && (
                   <Typography variant="body2" sx={{ mt: 1 }}>Visa · Mastercard</Typography>
@@ -117,8 +146,11 @@ const BillingSetup: React.FC = () => {
             {cycles.includes('quarterly') && <option value="quarterly">Quarterly</option>}
             {cycles.includes('yearly') && <option value="yearly">Annual</option>}
           </TextField>
-          <Button variant="contained" fullWidth onClick={handleCheckout} disabled={loading || !provider}>
-            {loading ? <CircularProgress size={20} /> : 'Continue to payment'}
+          {provider === 'paynow' && paymentMethod === 'ecocash' && (
+            <TextField fullWidth label="EcoCash number" value={phone} onChange={(event) => setPhone(event.target.value)} sx={{ mb: 2 }} placeholder="077…" />
+          )}
+          <Button variant="contained" fullWidth onClick={handleCheckout} disabled={loading || !provider || (provider === 'paynow' && paymentMethod === 'ecocash' && phone.trim().length < 9)}>
+            {loading ? <CircularProgress size={20} /> : provider === 'paynow' && paymentMethod === 'ecocash' ? 'Pay with EcoCash' : 'Continue to payment'}
           </Button>
           {provider === 'paynow' && (
             <Box sx={{ mt: 3 }}>

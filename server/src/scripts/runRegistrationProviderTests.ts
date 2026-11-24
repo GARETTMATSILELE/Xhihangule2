@@ -11,7 +11,8 @@ import { Subscription } from '../models/Subscription';
 import { PaymentSession } from '../models/PaymentSession';
 import { BillingPayment } from '../models/BillingPayment';
 import { OnboardingService } from '../services/onboardingService';
-import { selectSubscriptionProvider } from '../services/subscriptionPayments/providerAvailability';
+import { readProviderAvailability, selectPaynowMethod, selectSubscriptionProvider } from '../services/subscriptionPayments/providerAvailability';
+import { companyProfileWrite } from '../services/companyProfileWrite';
 import { setDodoGatewayForTests } from '../services/subscriptionPayments/dodoClient';
 import { startDodoSubscriptionCheckout } from '../services/subscriptionPayments/subscriptionCheckoutService';
 import { processVerifiedDodoEvent } from '../services/subscriptionPayments/dodoWebhookService';
@@ -31,6 +32,8 @@ function configure(extra: Record<string, string | undefined> = {}) {
   process.env.PAYNOW_INTEGRATION_KEY = 'registration-provider-test';
   process.env.PAYNOW_MODE = 'test';
   process.env.PAYNOW_DISABLE_LOCAL_CONFIG = '1';
+  delete process.env.PAYNOW_CARD_ENABLED;
+  process.env.PAYNOW_ECOCASH_ENABLED = 'true';
   process.env.DODO_PAYMENTS_ENABLED = 'true';
   process.env.DODO_PAYMENTS_MODE = 'test';
   process.env.DODO_PAYMENTS_API_KEY = 'dodo_test_key';
@@ -117,6 +120,14 @@ async function main() {
   check((selectSubscriptionProvider(undefined) as { code?: string }).code === 'PROVIDER_REQUIRED', 'no provider is selected when both are available');
   check((selectSubscriptionProvider('paynow') as { provider?: string }).provider === 'paynow', 'Paynow can be selected explicitly');
   check((selectSubscriptionProvider('dodo') as { provider?: string }).provider === 'dodo', 'Dodo can be selected explicitly');
+  const listed = readProviderAvailability();
+  check(listed[0]?.id === 'dodo' && listed[1]?.id === 'paynow', 'Dodo is listed before Paynow');
+  check(listed.find((item) => item.id === 'dodo')?.methods.some((method) => method.id === 'card') === true, 'Dodo offers card checkout');
+  check(listed.find((item) => item.id === 'paynow')?.methods.some((method) => method.id === 'card') !== true, 'Paynow cards stay hidden unless enabled');
+  check(listed.find((item) => item.id === 'paynow')?.methods.some((method) => method.id === 'ecocash') === true, 'Paynow offers EcoCash');
+  check((selectPaynowMethod('card') as { code?: string }).code === 'PAYNOW_CARD_DISABLED', 'a Paynow card checkout is rejected while cards are disabled');
+  const landlordProfile = companyProfileWrite({ name: 'Landlord', registrationNumber: '', tinNumber: ' ' }, 'INDIVIDUAL_LANDLORD');
+  check(landlordProfile.$set.registrationNumber === undefined && landlordProfile.$unset.registrationNumber === 1 && landlordProfile.$unset.tinNumber === 1, 'a blank landlord registration number is removed instead of stored');
 
   await mongoose.connect(TEST_DB, { serverSelectionTimeoutMS: 8000, autoIndex: false });
   if (mongoose.connection.name !== 'mantis_registration_provider_test') process.exit(1);

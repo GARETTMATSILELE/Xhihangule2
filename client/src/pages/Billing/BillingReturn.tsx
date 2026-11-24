@@ -54,19 +54,36 @@ const BillingReturn: React.FC = () => {
       return () => { stopped = true; };
     }
 
-    if (!reference) {
-      setPaymentStatus('pending');
-      setMessage('You have returned from Paynow. If you completed payment, your subscription will activate shortly.');
-      return;
-    }
-
     let stopped = false;
     let attempts = 0;
+    let activeReference = reference;
 
     const check = async () => {
+      if (!activeReference) {
+        try {
+          const session = await apiService.getCheckoutSession('current');
+          const recovered = String(session.data?.reference || '');
+          const state = String(session.data?.status || '').toLowerCase();
+          if (state === 'reconciled' || state === 'paid') {
+            if (stopped) return;
+            setPaymentStatus('paid');
+            setMessage('Payment received. Your Mantis subscription is active.');
+            return;
+          }
+          if (session.data?.provider === 'paynow' && recovered) activeReference = recovered;
+        } catch {
+          activeReference = '';
+        }
+      }
+      if (!activeReference) {
+        if (stopped) return;
+        setPaymentStatus('pending');
+        setMessage('You have returned from Paynow. If you completed payment, Mantis will finish activation when Paynow confirms it. Do not pay again.');
+        return;
+      }
       attempts += 1;
       try {
-        const resp = await api.post('/paynow/confirm', { reference });
+        const resp = await api.post('/paynow/confirm', { reference: activeReference });
         const state = String(resp.data?.paymentStatus || '').toLowerCase();
         if (stopped) return;
         if (state === 'reconciled' || resp.data?.activated === true) {

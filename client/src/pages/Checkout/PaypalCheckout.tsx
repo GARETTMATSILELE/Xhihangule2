@@ -21,6 +21,7 @@ type CheckoutQuote = {
   currency: string;
   status: string;
   provider?: PaymentProviderId;
+  reference?: string;
   awaitingConfirmation?: boolean;
 };
 
@@ -46,70 +47,13 @@ const PaypalCheckout: React.FC = () => {
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [method, setMethod] = useState<'provider' | 'cash'>('provider');
   const [provider, setProvider] = useState<PaymentProviderId | ''>('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [phone, setPhone] = useState('');
   const [providers, setProviders] = useState<PaymentProviderOption[]>([]);
   const [providersLoading, setProvidersLoading] = useState(true);
   const [providersError, setProvidersError] = useState('');
   const [cashCode, setCashCode] = useState('');
   const [cashPin, setCashPin] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setQuoteLoading(true);
-      try {
-        const path = paymentSessionId
-          ? `/billing/sessions/${encodeURIComponent(paymentSessionId)}`
-          : '/billing/sessions/current';
-        const response = await api.get(path);
-        if (!cancelled) {
-          setQuote(response.data);
-          setMessage(null);
-        }
-      } catch (e: any) {
-        if (!cancelled) {
-          setQuote(null);
-          setMessage({
-            type: 'error',
-            text: e?.response?.data?.message || 'Checkout details could not be loaded. Complete registration before paying.'
-          });
-        }
-      } finally {
-        if (!cancelled) setQuoteLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [paymentSessionId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.get('/billing/providers')
-      .then((response) => {
-        if (cancelled) return;
-        const methods = (response.data?.providers || []).filter((item: PaymentProviderOption) => item.available && item.cycles.includes(cycle));
-        setProviders(methods);
-      })
-      .catch(() => {
-        if (!cancelled) setProvidersError('Payment methods could not be loaded.');
-      })
-      .finally(() => {
-        if (!cancelled) setProvidersLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [cycle]);
-
-  useEffect(() => {
-    if (!quote?.provider || provider) return;
-    if (providers.some((item) => item.id === quote.provider)) setProvider(quote.provider);
-  }, [quote, provider, providers]);
-
-  const displayPlan = quote?.plan || plan;
-  const displayCycle = quote?.billingCycle || cycle;
-  const amount = quote ? Number(quote.amount).toFixed(2) : null;
 
   const routeAfterActivation = async () => {
     // Checkout routes are "public" in the router, so we can't rely on ProtectedRoute to steer correctly.
@@ -152,6 +96,118 @@ const PaypalCheckout: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setQuoteLoading(true);
+      try {
+        const path = paymentSessionId
+          ? `/billing/sessions/${encodeURIComponent(paymentSessionId)}`
+          : '/billing/sessions/current';
+        const response = await api.get(path);
+        if (!cancelled) {
+          setQuote(response.data);
+          setMessage(null);
+          const state = String(response.data?.status || '');
+          if (state === 'paid' || state === 'reconciled') {
+            routeAfterActivation();
+          }
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setQuote(null);
+          setMessage({
+            type: 'error',
+            text: e?.response?.data?.message || 'Checkout details could not be loaded. Complete registration before paying.'
+          });
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentSessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/billing/providers')
+      .then((response) => {
+        if (cancelled) return;
+        const methods = (response.data?.providers || []).filter((item: PaymentProviderOption) => item.available && item.cycles.includes(cycle));
+        setProviders(methods);
+      })
+      .catch(() => {
+        if (!cancelled) setProvidersError('Payment methods could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setProvidersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cycle]);
+
+  useEffect(() => {
+    if (provider || !providers.length) return;
+    const preferred = quote?.provider && providers.some((item) => item.id === quote.provider) ? quote.provider : providers[0].id;
+    setProvider(preferred);
+    const methods = providers.find((item) => item.id === preferred)?.methods || [];
+    if (methods.length === 1) setPaymentMethod(methods[0].id);
+  }, [quote, provider, providers]);
+
+  const displayPlan = quote?.plan || plan;
+  const displayCycle = quote?.billingCycle || cycle;
+  const amount = quote ? Number(quote.amount).toFixed(2) : null;
+
+  const checkExistingPayment = async () => {
+    if (quote?.provider === 'dodo') {
+      setLoading(true);
+      setMessage({ type: 'info', text: 'Checking this card payment. Do not pay again.' });
+      try {
+        await api.post('/billing/dodo/reconcile', { paymentSessionId: quote.paymentSessionId });
+        const session = await api.get(`/billing/sessions/${quote.paymentSessionId}`);
+        const state = String(session.data?.status || '').toLowerCase();
+        if (state === 'reconciled' || state === 'paid') {
+          await routeAfterActivation();
+          return;
+        }
+        setMessage({ type: 'info', text: 'This card payment is still being confirmed. Do not pay again.' });
+      } catch (e: any) {
+        setMessage({ type: 'error', text: e?.response?.data?.message || 'Mantis could not check this payment yet. Do not pay again.' });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    const reference = String(quote?.reference || '');
+    if (!reference) {
+      setMessage({ type: 'info', text: 'Mantis is still checking this payment. Do not pay again.' });
+      return;
+    }
+    setLoading(true);
+    setMessage({ type: 'info', text: 'Checking this payment with Paynow. Do not pay again.' });
+    try {
+      const confirmed = await api.post('/paynow/confirm', { reference });
+      const state = String(confirmed.data?.paymentStatus || '').toLowerCase();
+      if (state === 'reconciled' || confirmed.data?.activated === true || state === 'paid') {
+        await routeAfterActivation();
+        return;
+      }
+      if (state === 'failed' || state === 'cancelled' || state === 'expired') {
+        setMessage({ type: 'error', text: 'Paynow did not confirm this payment. You have not been asked to pay again.' });
+        return;
+      }
+      setMessage({ type: 'info', text: 'This payment is still processing. Mantis will finish activation when Paynow confirms it. Do not pay again.' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.response?.data?.message || 'Mantis could not check this payment yet. Do not pay again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleProviderCheckout = async () => {
     try {
       setLoading(true);
@@ -168,13 +224,34 @@ const PaypalCheckout: React.FC = () => {
       const resp = await api.post('/billing/checkout', {
         plan: displayPlan,
         cycle: displayCycle,
-        provider
+        provider,
+        paymentMethod: provider === 'paynow' ? paymentMethod : 'card',
+        ...(provider === 'paynow' && paymentMethod === 'ecocash' ? { phone } : {})
       });
       const redirectUrl = resp.data?.redirectUrl;
-      if (!redirectUrl) {
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return;
+      }
+      const reference = String(resp.data?.reference || '');
+      if (!reference) {
         throw new Error(resp.data?.message || 'Checkout did not return a payment page.');
       }
-      window.location.href = redirectUrl;
+      setMessage({ type: 'info', text: resp.data?.instructions || 'Approve the EcoCash prompt on your phone. Mantis will confirm the payment.' });
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 5000));
+        const confirmed = await api.post('/paynow/confirm', { reference });
+        const state = String(confirmed.data?.paymentStatus || '').toLowerCase();
+        if (state === 'reconciled' || confirmed.data?.activated === true || state === 'paid') {
+          await routeAfterActivation();
+          return;
+        }
+        if (state === 'failed' || state === 'cancelled' || state === 'expired') {
+          setMessage({ type: 'error', text: 'EcoCash did not complete this payment. You have not been asked to pay again.' });
+          return;
+        }
+      }
+      setMessage({ type: 'info', text: 'EcoCash is still processing. You can leave this page. Mantis will finish activation when the payment is confirmed. Do not pay again.' });
     } catch (e: any) {
       const code = e?.response?.data?.code;
       const text = code === 'PAYMENT_ALREADY_COMPLETED' || code === 'PAYMENT_AWAITING_CONFIRMATION' || code === 'PAYMENT_ATTEMPT_PENDING'
@@ -215,7 +292,7 @@ const PaypalCheckout: React.FC = () => {
         )}
         {!message && quote?.status === 'provider_created' && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            This payment is still being checked. Continue the existing checkout instead of starting another payment.
+            This payment is still being checked. Use Check payment. Do not start another payment.
           </Alert>
         )}
 
@@ -236,27 +313,45 @@ const PaypalCheckout: React.FC = () => {
             <PaymentMethodChoice
               providers={providers}
               value={provider}
-              onChange={setProvider}
+              onChange={(next) => {
+                setProvider(next);
+                const methods = providers.find((item) => item.id === next)?.methods || [];
+                setPaymentMethod(methods.length === 1 ? methods[0].id : '');
+              }}
+              method={paymentMethod}
+              onMethodChange={setPaymentMethod}
               disabled={loading || quote?.status === 'provider_created'}
               loading={providersLoading}
               error={providersError}
             />
+            {provider === 'paynow' && paymentMethod === 'ecocash' && (
+              <TextField
+                label="EcoCash number"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                size="small"
+                fullWidth
+                sx={{ mt: 2, bgcolor: 'background.paper' }}
+                placeholder="077…"
+                disabled={loading}
+              />
+            )}
             <Button
               variant="contained"
               color="secondary"
               fullWidth
               sx={{ mt: 2 }}
-              onClick={handleProviderCheckout}
-              disabled={loading || quoteLoading || providersLoading || !provider || !quote || quote.status === 'paid' || quote.status === 'reconciled'}
+              onClick={quote?.status === 'provider_created' ? checkExistingPayment : handleProviderCheckout}
+              disabled={loading || quoteLoading || providersLoading || !quote || quote.status === 'paid' || quote.status === 'reconciled' || (quote.status !== 'provider_created' && (!provider || (provider === 'paynow' && paymentMethod === 'ecocash' && phone.trim().length < 9)))}
             >
-              {loading ? <CircularProgress size={20} /> : checkoutButtonLabel(provider, 'paid')}
+              {loading ? <CircularProgress size={20} /> : quote?.status === 'provider_created' ? 'Check payment' : checkoutButtonLabel(provider, 'paid', paymentMethod)}
             </Button>
             <Typography variant="body2" sx={{ mt: 1, color: 'inherit', opacity: 0.9 }}>
               {provider === 'dodo'
-                ? 'You will be redirected to a secure card page. Returning to Mantis does not activate the subscription by itself.'
-                : provider === 'paynow'
-                  ? 'You will be redirected to Paynow. The subscription starts only after Paynow confirms the payment.'
-                  : 'Select Paynow or Dodo Payments. Checkout does not start until you continue.'}
+                ? 'You will be redirected to a secure card page. Mantis activates the subscription only after Dodo confirms the payment.'
+                : provider === 'paynow' && paymentMethod === 'ecocash'
+                  ? 'Approve the prompt on your phone. Stay on this page while Mantis confirms the payment.'
+                  : 'Select a provider. Checkout does not start until you continue.'}
             </Typography>
           </Box>
         ) : (

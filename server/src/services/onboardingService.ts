@@ -428,11 +428,28 @@ export class OnboardingService {
     offer: { plan: Plan; billingCycle: 'monthly' | 'yearly' },
     provider?: SubscriptionProviderId
   ) {
-    const [subscription, sessions, onboardingSession] = await Promise.all([
+    let [subscription, sessions, onboardingSession] = await Promise.all([
       Subscription.findOne({ companyId: company._id }).sort({ createdAt: -1 }),
       PaymentSession.find({ companyId: company._id }).sort({ createdAt: -1 }),
       OnboardingSession.findOne({ companyId: company._id }).sort({ createdAt: -1 })
     ]);
+    const awaitingRegistration = ['PENDING_PAYMENT', 'PENDING_SETUP', 'FAILED_SETUP', 'PAYMENT_RECEIVED'].includes(String(company.onboardingStatus || ''));
+    const waitingOnPaynow = sessions.some((session) => session.provider === 'paynow' && (session.status === 'provider_created' || session.status === 'paid'));
+    if (waitingOnPaynow || awaitingRegistration) {
+      if (waitingOnPaynow) {
+        const { reconcilePaynowForCompany } = await import('./paynowRecoveryService');
+        await reconcilePaynowForCompany(String(company._id)).catch(() => undefined);
+      }
+      const { resumeVerifiedRegistration } = await import('./billingActivationService');
+      await resumeVerifiedRegistration(String(company._id)).catch(() => undefined);
+      const refreshed = await Company.findById(company._id);
+      if (refreshed) company = refreshed;
+      [subscription, sessions, onboardingSession] = await Promise.all([
+        Subscription.findOne({ companyId: company._id }).sort({ createdAt: -1 }),
+        PaymentSession.find({ companyId: company._id }).sort({ createdAt: -1 }),
+        OnboardingSession.findOne({ companyId: company._id }).sort({ createdAt: -1 })
+      ]);
+    }
     const subscriptionStatus = String(subscription?.status || '').toLowerCase();
     const companySubscription = String(company.subscriptionStatus || '').toLowerCase();
     const onboardingStatus = String(company.onboardingStatus || '');

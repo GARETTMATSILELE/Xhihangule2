@@ -80,11 +80,13 @@ The command prints hosts, the path, the application mode, and issue codes. It do
 
 Before a production test, `GET https://www.mantisafrica.com/api/paynow/status` should show:
 
-- `mode` equal to the mode you set
+- `hasIntegrationId` true
+- `hasIntegrationKey` true
 - `callbackReady` true
+- `mode` equal to the mode you set
 - `issues` empty
-- `resultHost` `www.mantisafrica.com` and `resultPath` `/api/paynow/result`
-- `providerDashboardModeChecked` false
+
+The public status response does not include the integration id, the integration key, or the key length. Host and path checks stay in `npm run paynow:preflight`.
 
 An empty unsigned POST to `/api/paynow/result` should return 401. That only proves the route is reachable and hash verification is on.
 

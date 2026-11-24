@@ -2,6 +2,12 @@ import { paynowConfigurationState } from '../registrationPaymentPolicy';
 
 export type SubscriptionProviderId = 'paynow' | 'dodo';
 export type SubscriptionCycle = 'monthly' | 'quarterly' | 'yearly';
+export type PaynowMethodId = 'ecocash' | 'card';
+
+export interface ProviderMethod {
+  id: string;
+  label: string;
+}
 
 export interface ProviderAvailability {
   id: SubscriptionProviderId;
@@ -12,6 +18,7 @@ export interface ProviderAvailability {
   testMode: boolean;
   cycles: SubscriptionCycle[];
   cardBrands: Array<'visa' | 'mastercard'>;
+  methods: ProviderMethod[];
   reason?: string;
 }
 
@@ -47,33 +54,83 @@ export function readDodoConfig(env: NodeJS.ProcessEnv = process.env) {
   return { enabled, mode, apiKey, webhookKey, cycles, configured };
 }
 
+export function paynowMethodFlags(env: NodeJS.ProcessEnv = process.env): { card: boolean; ecocash: boolean } {
+  return {
+    card: flag(env.PAYNOW_CARD_ENABLED, false),
+    ecocash: flag(env.PAYNOW_ECOCASH_ENABLED, true)
+  };
+}
+
+export function paynowMethods(env: NodeJS.ProcessEnv = process.env): ProviderMethod[] {
+  const flags = paynowMethodFlags(env);
+  const methods: ProviderMethod[] = [];
+  if (flags.ecocash) methods.push({ id: 'ecocash', label: 'EcoCash' });
+  if (flags.card) methods.push({ id: 'card', label: 'Visa and Mastercard' });
+  return methods;
+}
+
+export function selectPaynowMethod(requested: unknown, env: NodeJS.ProcessEnv = process.env):
+  | { ok: true; method: PaynowMethodId }
+  | { ok: false; status: number; code: string; message: string } {
+  const flags = paynowMethodFlags(env);
+  const enabled = (['ecocash', 'card'] as PaynowMethodId[]).filter((method) => flags[method]);
+  const raw = String(requested ?? '').trim().toLowerCase();
+  if (!enabled.length) {
+    return { ok: false, status: 403, code: 'PAYNOW_METHOD_DISABLED', message: 'Paynow is not available for checkout.' };
+  }
+  if (!raw) {
+    if (enabled.length === 1) return { ok: true, method: enabled[0] };
+    return { ok: false, status: 400, code: 'PAYNOW_METHOD_REQUIRED', message: 'Choose EcoCash or card before continuing.' };
+  }
+  if (raw !== 'ecocash' && raw !== 'card') {
+    return { ok: false, status: 400, code: 'PAYNOW_METHOD_INVALID', message: 'That Paynow payment method is not supported.' };
+  }
+  if (raw === 'card' && !flags.card) {
+    return {
+      ok: false,
+      status: 403,
+      code: 'PAYNOW_CARD_DISABLED',
+      message: 'Visa and Mastercard are not available through Paynow. Use EcoCash, or pay by card with Dodo Payments.'
+    };
+  }
+  if (raw === 'ecocash' && !flags.ecocash) {
+    return { ok: false, status: 403, code: 'PAYNOW_ECOCASH_DISABLED', message: 'EcoCash is not available through Paynow.' };
+  }
+  return { ok: true, method: raw };
+}
+
 export function readProviderAvailability(env: NodeJS.ProcessEnv = process.env): ProviderAvailability[] {
   const paynow = paynowConfigurationState(env);
   const paynowEnabled = flag(env.PAYNOW_ENABLED, true);
   const paynowMode = paynow.mode;
   const paynowConfigured = paynow.configured && (paynow.mode === 'test' || paynow.mode === 'live' || paynow.mode === 'unspecified');
+  const methods = paynowMethods(env);
   const dodo = readDodoConfig(env);
+  const dodoCard = dodo.enabled && dodo.configured;
   return [
-    {
-      id: 'paynow',
-      enabled: paynowEnabled,
-      configured: paynowConfigured,
-      available: paynowEnabled && paynowConfigured,
-      mode: paynowMode,
-      testMode: paynow.mode === 'test',
-      cycles: ['monthly', 'yearly'],
-      cardBrands: []
-    },
     {
       id: 'dodo',
       enabled: dodo.enabled,
       configured: dodo.configured,
-      available: dodo.enabled && dodo.configured,
+      available: dodoCard,
       mode: dodo.mode,
       testMode: dodo.mode === 'test',
       cycles: dodo.cycles.length ? dodo.cycles : ['monthly', 'yearly'],
-      cardBrands: dodo.enabled && dodo.configured ? ['visa', 'mastercard'] : [],
+      cardBrands: dodoCard ? ['visa', 'mastercard'] : [],
+      methods: dodoCard ? [{ id: 'card', label: 'Visa and Mastercard' }] : [],
       reason: !dodo.enabled ? 'disabled' : dodo.mode === 'invalid' ? 'invalid_mode' : !dodo.apiKey || !dodo.webhookKey ? 'missing_credentials' : !dodo.cycles.length ? 'missing_product' : undefined
+    },
+    {
+      id: 'paynow',
+      enabled: paynowEnabled,
+      configured: paynowConfigured,
+      available: paynowEnabled && paynowConfigured && methods.length > 0,
+      mode: paynowMode,
+      testMode: paynow.mode === 'test',
+      cycles: ['monthly', 'yearly'],
+      cardBrands: [],
+      methods,
+      reason: !paynowEnabled ? 'disabled' : !paynowConfigured ? 'not_configured' : !methods.length ? 'no_enabled_method' : undefined
     }
   ];
 }
@@ -106,11 +163,13 @@ export function selectSubscriptionProvider(requested: unknown, env: NodeJS.Proce
   if (!chosen.configured || !chosen.available) {
     return {
       ok: false,
-      status: 503,
-      code: raw === 'dodo' ? 'DODO_NOT_CONFIGURED' : 'PAYNOW_NOT_CONFIGURED',
+      status: chosen.reason === 'no_enabled_method' ? 403 : 503,
+      code: raw === 'dodo' ? 'DODO_NOT_CONFIGURED' : chosen.reason === 'no_enabled_method' ? 'PAYNOW_METHOD_DISABLED' : 'PAYNOW_NOT_CONFIGURED',
       message: raw === 'dodo'
         ? 'Dodo Payments is not configured. Paynow is unchanged.'
-        : 'Paynow is not configured.'
+        : chosen.reason === 'no_enabled_method'
+          ? 'Paynow is not available for checkout.'
+          : 'Paynow is not configured.'
     };
   }
   return { ok: true, provider: raw };

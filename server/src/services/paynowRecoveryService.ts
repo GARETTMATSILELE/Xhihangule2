@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { PaymentSession } from '../models/PaymentSession';
 import { applyPolledPayment } from './applyPolledPayment';
+import { activateSubscriptionFromPayment } from './billingActivationService';
 import { logger } from '../utils/logger';
 import { normalizePaynowCredential, parsePaynowBody } from './paynowHash';
 import {
@@ -99,6 +100,42 @@ async function recoverOneSession(session: {
   if (verdict.outcome === 'rejected') return 'rejected';
   await applyPolledPayment(reference, poll);
   return 'applied';
+}
+
+const USER_POLL_GAP_MS = 15 * 1000;
+
+/**
+ * One poll for a company that already paid or is waiting on Paynow.
+ * This does not consume the background recovery attempt budget.
+ * A Paynow outage leaves the verified payment and the company unchanged.
+ */
+export async function reconcilePaynowForCompany(companyId: string): Promise<void> {
+  if (!companyId || !integrationKey()) return;
+  const sessions = await PaymentSession.find({
+    companyId,
+    provider: 'paynow',
+    status: { $in: ['provider_created', 'paid'] }
+  }).sort({ createdAt: -1 }).limit(3);
+
+  for (const session of sessions) {
+    if (session.status === 'paid') {
+      await activateSubscriptionFromPayment({
+        paymentSessionId: String(session._id),
+        provider: 'paynow',
+        providerRef: session.providerRef,
+        paidAt: session.paidAt || new Date(),
+        rawProviderResponse: session.rawProviderResponse
+      });
+      continue;
+    }
+    const last = (session.metadata as { paynowRecovery?: { lastCustomerCheckAt?: string } } | undefined)?.paynowRecovery?.lastCustomerCheckAt;
+    if (last && Date.now() - new Date(last).getTime() < USER_POLL_GAP_MS) continue;
+    await PaymentSession.updateOne(
+      { _id: session._id, status: 'provider_created' },
+      { $set: { 'metadata.paynowRecovery.lastCustomerCheckAt': new Date().toISOString() } }
+    );
+    await recoverOneSession(session);
+  }
 }
 
 let recoveryTimer: NodeJS.Timeout | undefined;

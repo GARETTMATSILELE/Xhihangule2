@@ -109,9 +109,9 @@ export const FINANCIAL_UNIQUENESS: FinancialUniquenessRequirement[] = [
     index: { provider: 1, eventId: 1 },
     options: { unique: true },
     invariant: 'One stored Paynow callback receipt per provider event id.',
-    declaredIn: 'WebhookEventReceipt schema',
+    declaredIn: 'WebhookEventReceipt schema and createIndexes()',
     productionEnforcement: 'DECLARED_UNVERIFIED_ON_COSMOS',
-    limitation: 'eventId is the Paynow hash, poll URL, or reference. A retry that changes the hash is a different event id and is not collapsed by this index.'
+    limitation: 'Startup counts existing provider and eventId pairs and creates the unique index only when no duplicates exist. A Cosmos deployment still has to be checked before this index is treated as enforced there. eventId is the Paynow hash, poll URL, or reference. A retry that changes the hash is a different event id. Concurrent duplicates are refused by the application claim and do not activate a second subscription.'
   },
   {
     collection: 'payment_sessions',

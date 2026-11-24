@@ -24,7 +24,8 @@ import { recordAuditEvent } from '../services/auditService';
 import { logger } from '../utils/logger';
 import { classifyOperationalFailure } from '../services/operationalFailure';
 import { processVerifiedPaynowEvent } from '../services/paynowCallbackService';
-import { installCorrectPaynowHashing, normalizePaynowCredential, shouldLoadLocalPaynowConfig } from '../services/paynowHash';
+import { installCorrectPaynowHashing, normalizePaynowCredential, paynowReturnUrlForReference, shouldLoadLocalPaynowConfig } from '../services/paynowHash';
+import { selectPaynowMethod } from '../services/subscriptionPayments/providerAvailability';
 import { hostedCheckoutStarted } from '../services/subscriptionPayments/providerAvailability';
 
 // The official package does not ship TypeScript types.
@@ -136,6 +137,12 @@ function safeInitiationDiag(fields: Record<string, string> | undefined, gatewayE
 
 function paynowLog(level: 'info' | 'warn', event: string, fields: Record<string, unknown>) {
 	logger[level](event, fields);
+}
+
+function assertPaynowMethod(method: 'card' | 'ecocash') {
+	const decision = selectPaynowMethod(method);
+	if (decision.ok) return;
+	throw httpError(decision.message, decision.status, decision.code);
 }
 
 function httpError(message: string, statusCode: number, code?: string) {
@@ -254,7 +261,9 @@ export async function initiatePaynowCheckout(req: Request, input: {
 		throw error;
 	}
 
+	assertPaynowMethod('card');
 	const paynow = getPaynowForRequest(req);
+	paynow.returnUrl = paynowReturnUrlForReference(String(paynow.returnUrl || ''), ref);
 	const payment = paynow.createPayment(ref, email || '');
 	payment.add(input.description || `Mantis ${plan} ${cycle} subscription`, priced);
 	const initiation = typeof paynow.build === 'function' ? paynow.build(payment) as Record<string, string> : undefined;
@@ -316,7 +325,8 @@ export async function initiatePaynowCheckout(req: Request, input: {
 	session.metadata = {
 		...(session.metadata || {}),
 		paynowMode: deployment.mode,
-		testTransaction: deployment.mode === 'test'
+		testTransaction: deployment.mode === 'test',
+		paynowMethod: 'card'
 	};
 	session.rawProviderResponse = {
 		redirectUrl: String(response.redirectUrl),
@@ -346,7 +356,6 @@ export async function initiatePaynowCheckout(req: Request, input: {
 		currency: 'USD',
 		resultUrl: initiation?.resulturl,
 		returnUrl: initiation?.returnurl,
-		integrationId: initiation?.id,
 		statusField: initiation?.status,
 		referenceSent: initiation?.reference,
 		amountSent: initiation?.amount,
@@ -498,20 +507,11 @@ export function getStatus(_req: Request, res: Response) {
 		const state = paynowConfigurationState();
 		const deployment = deploymentForRequest(_req);
 		return res.json({
-			status: state.configured ? 'ok' : 'disabled',
-			build: String(process.env.GIT_SHA || '').slice(0, 12) || null,
-			mode: state.mode,
-			integrationId: env.INTEGRATION_ID || null,
 			hasIntegrationId: Boolean(env.INTEGRATION_ID),
 			hasIntegrationKey: Boolean(env.INTEGRATION_KEY),
-			integrationKeyLength: env.INTEGRATION_KEY ? env.INTEGRATION_KEY.length : 0,
-			resultHost: deployment.resultHost || null,
-			resultPath: deployment.resultPath || null,
-			returnHost: deployment.returnHost || null,
-			returnPath: deployment.returnPath || null,
 			callbackReady: deployment.ok,
-			issues: deployment.issues,
-			providerDashboardModeChecked: false
+			mode: state.mode,
+			issues: deployment.issues
 		});
 	} catch (e: any) {
 		return res.status(500).json({ status: 'error', message: 'Failed to read Paynow status' });
@@ -579,19 +579,24 @@ export async function createMobilePayment(req: Request, res: Response) {
 				reused: true
 			});
 		}
-		const amt = Number(session.amount);
-		if (!Number.isFinite(amt) || amt <= 0) {
+		const amt = await chargeForPlan(session.plan as Plan, session.billingCycle === 'yearly' ? 'yearly' : 'monthly');
+		if (amt == null || amt <= 0) {
 			return res.status(503).json({ status: 'error', message: 'This plan does not have a payable amount', code: 'REGISTRATION_PRICE_NOT_CONFIGURED' });
+		}
+		if (session.amount !== amt) {
+			session.amount = amt;
+			await session.save();
 		}
 		const ref = session.providerRef && String(session.providerRef).trim()
 			? String(session.providerRef).trim()
 			: `SUBS-${session._id.toString()}`;
 
+		assertPaynowMethod('ecocash');
 		const paynow = getPaynowForRequest(req);
+		paynow.returnUrl = paynowReturnUrlForReference(String(paynow.returnUrl || ''), ref);
 		const normalizedMethod = String(method).toLowerCase();
-		const allowed = ['ecocash', 'onemoney', 'telecash'];
-		if (!allowed.includes(normalizedMethod)) {
-			return res.status(400).json({ status: 'error', message: `method must be one of: ${allowed.join(', ')}` });
+		if (normalizedMethod !== 'ecocash') {
+			return res.status(403).json({ status: 'error', message: 'Only EcoCash is available through Paynow.', code: 'PAYNOW_METHOD_DISABLED' });
 		}
 		// Create a standard payment, then invoke sendMobile(payment, phone, method)
 		const payment = paynow.createPayment(ref, paynowCustomerAuthEmail(email || ''));
@@ -607,13 +612,18 @@ export async function createMobilePayment(req: Request, res: Response) {
 			session.providerRef = ref;
 			session.pollUrl = pollUrl;
 			session.status = 'provider_created';
+			session.currency = 'USD';
 			session.metadata = {
 				...(session.metadata || {}),
 				paynowMode: paynowConfigurationState().mode,
-				testTransaction: paynowConfigurationState().mode === 'test'
+				testTransaction: paynowConfigurationState().mode === 'test',
+				paynowMethod: 'ecocash'
 			};
 			session.rawProviderResponse = { pollUrl, instructions: response.instructions || null };
 			await session.save();
+			if (session.billingPaymentId) {
+				await BillingPayment.findByIdAndUpdate(session.billingPaymentId, { $set: { providerRef: ref, amount: amt, currency: 'USD', method: 'ecocash' } });
+			}
 			return res.json({
 				status: 'ok',
 				reference: ref,

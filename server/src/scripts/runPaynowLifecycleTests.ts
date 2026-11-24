@@ -21,6 +21,8 @@ import {
 } from '../services/registrationPaymentPolicy';
 import { canonicalRedirectTarget } from '../utils/canonicalHost';
 import paynowRoutes from '../routes/paynowRoutes';
+import { ensureWebhookEventReceiptIndex } from '../models/indexes';
+import { resumeVerifiedRegistration } from '../services/billingActivationService';
 import { Company } from '../models/Company';
 import { User } from '../models/User';
 import { Subscription } from '../models/Subscription';
@@ -363,6 +365,27 @@ async function main() {
     WebhookEventReceipt.syncIndexes(),
     AuditLog.syncIndexes()
   ]);
+  const receiptIndexes = await WebhookEventReceipt.collection.indexes();
+  for (const index of receiptIndexes) {
+    if (index.unique && index.key?.provider === 1 && index.key?.eventId === 1 && index.name) {
+      await WebhookEventReceipt.collection.dropIndex(index.name);
+    }
+  }
+  await WebhookEventReceipt.create({ provider: 'paynow', eventId: 'dup-a', status: 'processed' });
+  await WebhookEventReceipt.create({ provider: 'paynow', eventId: 'dup-a', status: 'processing' });
+  const skippedIndex = await ensureWebhookEventReceiptIndex();
+  record('duplicate webhook receipts block unique index creation', skippedIndex.enforced === false && skippedIndex.duplicateGroups >= 1);
+  await WebhookEventReceipt.deleteMany({ eventId: 'dup-a' });
+  const enforcedIndex = await ensureWebhookEventReceiptIndex();
+  await WebhookEventReceipt.create({ provider: 'paynow', eventId: 'lock-a', status: 'processed' });
+  let duplicateRejected = false;
+  try {
+    await WebhookEventReceipt.create({ provider: 'paynow', eventId: 'lock-a', status: 'processing' });
+  } catch (error) {
+    duplicateRejected = Number((error as { code?: number }).code) === 11000;
+  }
+  record('startup webhook index rejects a second provider event', enforcedIndex.enforced === true && duplicateRejected);
+  await WebhookEventReceipt.deleteMany({ eventId: 'lock-a' });
   await Plan.create({ code: 'INDIVIDUAL', name: 'Individual', monthlyPrice: AMOUNT, annualPrice: 200, currency: 'USD', isActive: true });
   await Plan.create({ code: 'INDIVIDUAL', name: 'Individual', monthlyPrice: AMOUNT, annualPrice: 200, currency: 'USD', isActive: true });
 
@@ -375,6 +398,20 @@ async function main() {
   const port = (server.address() as { port: number }).port;
 
   try {
+    const status = await request(port, 'GET', '/api/paynow/status', undefined);
+    const statusText = JSON.stringify(status.json);
+    record('Public Paynow status does not expose the integration id',
+      status.status === 200
+      && status.json.integrationId === undefined
+      && status.json.integrationKeyLength === undefined
+      && status.json.hasIntegrationId === true
+      && status.json.hasIntegrationKey === true
+      && status.json.callbackReady === true
+      && status.json.mode === 'test'
+      && Array.isArray(status.json.issues)
+      && !statusText.includes('90001')
+      && !statusText.includes(KEY));
+
     resetDouble();
     const paid = await world('paid', 'garet.matsi@gmail.com');
     const created = await request(port, 'POST', '/api/paynow/web/create', paid.token, { paymentSessionId: String(paid.session._id), email: 'garet.matsi@gmail.com' });
@@ -394,6 +431,7 @@ async function main() {
       && paynowTestDouble.last?.email === 'merchant@example.test'
       && (stored?.metadata as { paynowMode?: string })?.paynowMode === 'test'
       && paynowTestDouble.last?.resultUrl === 'https://payments.example.test/api/paynow/result'
+      && String(paynowTestDouble.last?.returnUrl || '').includes(`reference=${encodeURIComponent(String(stored?.providerRef || ''))}`)
       && paynowTestDouble.last?.integrationId === '90001'
       && initiated === 1,
       `http ${created.status} session ${stored?.status} subscription ${subscription?.status}`);
@@ -402,6 +440,30 @@ async function main() {
     paynowTestDouble.pollReference = String(stored?.providerRef || '');
     const again = await request(port, 'POST', '/api/paynow/web/create', paid.token, { paymentSessionId: String(paid.session._id) });
     record('A An open checkout is not sent to Paynow a second time', again.status === 200 && paynowTestDouble.sends === 0);
+
+    resetDouble();
+    const savedCardFlag = process.env.PAYNOW_CARD_ENABLED;
+    delete process.env.PAYNOW_CARD_ENABLED;
+    const cardBlockedWorld = await world('card-blocked');
+    const cardBlocked = await request(port, 'POST', '/api/paynow/web/create', cardBlockedWorld.token, { paymentSessionId: String(cardBlockedWorld.session._id) });
+    process.env.PAYNOW_CARD_ENABLED = savedCardFlag;
+    record('Paynow card checkout is rejected when cards are disabled', cardBlocked.status === 403 && cardBlocked.json.code === 'PAYNOW_CARD_DISABLED' && paynowTestDouble.sends === 0, `http ${cardBlocked.status} ${cardBlocked.json.code}`);
+
+    resetDouble();
+    const eco = await world('ecocash');
+    const ecoStarted = await request(port, 'POST', '/api/paynow/mobile/create', eco.token, {
+      paymentSessionId: String(eco.session._id),
+      phone: '0771111111',
+      method: 'ecocash',
+      email: 'buyer@example.test'
+    });
+    record('EcoCash checkout keeps the customer reference on the return URL',
+      ecoStarted.status === 200
+      && !ecoStarted.json.redirectUrl
+      && ecoStarted.json.instructions
+      && String(paynowTestDouble.last?.returnUrl || '').includes('reference=')
+      && paynowTestDouble.last?.method === 'ecocash',
+      `http ${ecoStarted.status}`);
 
     resetDouble();
     process.env.PAYNOW_MERCHANT_EMAIL = 'merchant@example.test';
@@ -636,6 +698,27 @@ async function main() {
     const retriedAgain = await request(port, 'POST', '/api/paynow/result', undefined, blockedNotice, 'application/x-www-form-urlencoded');
     record('The retried callback does not activate the subscription again',
       retriedAgain.json.status === 'duplicate' && retriedAgain.json.activated === false && await AuditLog.countDocuments({ entityId: String(modeMismatch.session._id), action: 'payment.verified' }) === 1);
+
+    const recovered = await world('resume');
+    await PaymentSession.updateOne({ _id: recovered.session._id }, { $set: { status: 'reconciled', paidAt: new Date() } });
+    await Subscription.updateOne({ _id: recovered.subscription._id }, { $set: { status: 'active' } });
+    await resumeVerifiedRegistration(String(recovered.company._id));
+    const recoveredCompany = await Company.findById(recovered.company._id);
+    const recoveredSubscriptions = await Subscription.countDocuments({ companyId: recovered.company._id });
+    record('A reconciled payment finishes company setup without another charge',
+      recoveredCompany?.onboardingStatus === 'INITIALIZING_WORKSPACE'
+      && recoveredCompany?.subscriptionStatus === 'active'
+      && recoveredSubscriptions === 1
+      && (await PaymentSession.findById(recovered.session._id))?.status === 'reconciled');
+    await resumeVerifiedRegistration(String(recovered.company._id));
+    record('Repeating registration recovery does not create another subscription',
+      await Subscription.countDocuments({ companyId: recovered.company._id }) === 1);
+
+    const unfinished = await world('unfinished');
+    await resumeVerifiedRegistration(String(unfinished.company._id));
+    record('An unverified Paynow session is not marked paid during recovery',
+      (await PaymentSession.findById(unfinished.session._id))?.status === 'pending'
+      && (await Company.findById(unfinished.company._id))?.onboardingStatus === 'PENDING_PAYMENT');
 
     record('J Tests stayed on the isolated database and the Paynow stand-in',
       mongoose.connection.name === 'mantis_paynow_lifecycle_test'

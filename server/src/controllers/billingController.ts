@@ -6,11 +6,13 @@ import { Subscription } from '../models/Subscription';
 import { Voucher } from '../models/Voucher';
 import { PaymentSession } from '../models/PaymentSession';
 import { Company } from '../models/Company';
-import { activateSubscriptionFromPayment } from '../services/billingActivationService';
+import { activateSubscriptionFromPayment, resumeVerifiedRegistration } from '../services/billingActivationService';
 import { enterpriseDirectCheckoutEnabled } from '../services/registrationPaymentPolicy';
 import { chargeForPlan, listDashboardPlans } from '../services/systemPlanService';
 import { createPaynowSubscriptionProvider } from '../services/subscriptionPayments/paynowSubscriptionProvider';
-import { hostedCheckoutStarted, readProviderAvailability, selectSubscriptionProvider, SubscriptionCycle } from '../services/subscriptionPayments/providerAvailability';
+import { createMobilePayment } from './paynowController';
+import { hostedCheckoutStarted, readProviderAvailability, selectPaynowMethod, selectSubscriptionProvider, SubscriptionCycle } from '../services/subscriptionPayments/providerAvailability';
+import { reconcilePaynowForCompany } from '../services/paynowRecoveryService';
 import { startDodoSubscriptionCheckout } from '../services/subscriptionPayments/subscriptionCheckoutService';
 import { reconcileDodoPayment } from '../services/subscriptionPayments/dodoWebhookService';
 import { subscriptionListPrice } from '../services/subscriptionPayments/dodoProductMap';
@@ -41,6 +43,8 @@ export const getCheckoutSession = async (req: Request, res: Response) => {
     provider: { $in: ['paynow', 'dodo'] }
   };
   if (requestedId !== 'current') query._id = requestedId;
+  await reconcilePaynowForCompany(String(req.user.companyId)).catch(() => undefined);
+  await resumeVerifiedRegistration(String(req.user.companyId)).catch(() => undefined);
   const session = await PaymentSession.findOne(query).sort({ createdAt: -1 });
   if (!session) return res.status(404).json({ message: 'No checkout is waiting for this company', code: 'NO_CHECKOUT' });
   const priced = await subscriptionListPrice(session.plan, session.billingCycle);
@@ -55,9 +59,27 @@ export const getCheckoutSession = async (req: Request, res: Response) => {
     currency: session.currency || 'USD',
     status: session.status,
     provider: session.provider,
+    reference: session.provider === 'paynow' ? session.providerRef : undefined,
     awaitingConfirmation: hostedCheckoutStarted(session)
   });
 };
+
+async function invokePaynowMobile(req: Request, paymentSessionId: string, phone: string): Promise<{ statusCode: number; body: any }> {
+  let statusCode = 200;
+  let body: any = {};
+  const response = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(payload: any) {
+      body = payload;
+      return this;
+    }
+  };
+  await createMobilePayment({ ...req, body: { paymentSessionId, phone, method: 'ecocash', email: req.body?.email } } as Request, response as any);
+  return { statusCode, body };
+}
 
 export const createCheckout = async (req: Request, res: Response) => {
   const { plan, cycle }: { plan: Plan; cycle: SubscriptionCycle } = req.body || {};
@@ -71,6 +93,13 @@ export const createCheckout = async (req: Request, res: Response) => {
   if (!selection.ok) return res.status(selection.status).json({ message: selection.message, code: selection.code });
   if (selection.provider === 'paynow' && cycle === 'quarterly') {
     return res.status(400).json({ message: 'Paynow subscription checkout does not bill quarterly.', code: 'CYCLE_NOT_SUPPORTED' });
+  }
+  const paynowMethod = selection.provider === 'paynow' ? selectPaynowMethod(req.body?.paymentMethod) : null;
+  if (paynowMethod && !paynowMethod.ok) {
+    return res.status(paynowMethod.status).json({ message: paynowMethod.message, code: paynowMethod.code });
+  }
+  if (paynowMethod?.ok && paynowMethod.method === 'ecocash' && !String(req.body?.phone || '').trim()) {
+    return res.status(400).json({ message: 'Enter the EcoCash number that should approve this payment.', code: 'PAYNOW_PHONE_REQUIRED' });
   }
 
   const pendingRegistration = await PaymentSession.findOne({
@@ -128,6 +157,24 @@ export const createCheckout = async (req: Request, res: Response) => {
       }
     }
     try {
+      if (paynowMethod?.ok && paynowMethod.method === 'ecocash') {
+        const mobile = await invokePaynowMobile(req, String(openSession._id), String(req.body?.phone || ''));
+        if (mobile.statusCode >= 400) {
+          return res.status(mobile.statusCode).json({
+            message: mobile.body?.message || 'Failed to start EcoCash checkout',
+            code: mobile.body?.code || 'PAYNOW_CHECKOUT_FAILED',
+            paymentSessionId: openSession._id
+          });
+        }
+        return res.json({
+          status: 'pending',
+          paymentMethod: 'ecocash',
+          reference: mobile.body?.reference,
+          instructions: mobile.body?.instructions || null,
+          paymentId: openSession.billingPaymentId,
+          paymentSessionId: openSession._id
+        });
+      }
       const checkout = await createPaynowSubscriptionProvider(req).createCheckout({
         paymentSessionId: String(openSession._id),
         companyId: String(req.user.companyId),
@@ -143,6 +190,7 @@ export const createCheckout = async (req: Request, res: Response) => {
       });
       return res.json({
         redirectUrl: checkout.redirectUrl,
+        paymentMethod: 'card',
         paymentId: openSession.billingPaymentId,
         paymentSessionId: openSession._id,
         reference: checkout.providerTransactionId,
@@ -195,7 +243,7 @@ export const createCheckout = async (req: Request, res: Response) => {
     cycle,
     amount,
     currency: 'USD',
-    method: 'card',
+    method: paynowMethod?.ok && paynowMethod.method === 'ecocash' ? 'ecocash' : 'card',
     provider: 'paynow',
     providerRef: ref,
     idempotencyKey,
@@ -204,9 +252,27 @@ export const createCheckout = async (req: Request, res: Response) => {
   paymentSession.billingPaymentId = payment._id as any;
   await paymentSession.save();
 
-  let checkout;
   try {
-    checkout = await createPaynowSubscriptionProvider(req).createCheckout({
+    if (paynowMethod?.ok && paynowMethod.method === 'ecocash') {
+      const mobile = await invokePaynowMobile(req, String(paymentSession._id), String(req.body?.phone || ''));
+      if (mobile.statusCode >= 400) {
+        return res.status(mobile.statusCode).json({
+          message: mobile.body?.message || 'Failed to start EcoCash checkout',
+          code: mobile.body?.code || 'PAYNOW_CHECKOUT_FAILED',
+          paymentId: payment._id,
+          paymentSessionId: paymentSession._id
+        });
+      }
+      return res.json({
+        status: 'pending',
+        paymentMethod: 'ecocash',
+        reference: mobile.body?.reference,
+        instructions: mobile.body?.instructions || null,
+        paymentId: payment._id,
+        paymentSessionId: paymentSession._id
+      });
+    }
+    const checkout = await createPaynowSubscriptionProvider(req).createCheckout({
       paymentSessionId: String(paymentSession._id),
       companyId: String(req.user.companyId),
       subscriptionId: String(subscription._id),
@@ -219,6 +285,20 @@ export const createCheckout = async (req: Request, res: Response) => {
       currency: 'USD',
       description: `Mantis ${plan} ${cycle} subscription`
     });
+    return res.json({
+      redirectUrl: checkout.redirectUrl,
+      paymentMethod: 'card',
+      paymentId: payment._id,
+      paymentSessionId: paymentSession._id,
+      reference: checkout.providerTransactionId || ref,
+      metadata: {
+        companyId: req.user.companyId,
+        userId: req.user.userId,
+        plan,
+        billingCycle: cycle,
+        onboardingSessionId: paymentSession.onboardingSessionId
+      }
+    });
   } catch (e: any) {
     return res.status(e?.statusCode || 502).json({
       message: e?.message || 'Failed to start Paynow checkout',
@@ -227,20 +307,6 @@ export const createCheckout = async (req: Request, res: Response) => {
       reference: ref
     });
   }
-
-  return res.json({
-    redirectUrl: checkout.redirectUrl,
-    paymentId: payment._id,
-    paymentSessionId: paymentSession._id,
-    reference: ref,
-    metadata: {
-      companyId: req.user.companyId,
-      userId: req.user.userId,
-      plan,
-      billingCycle: cycle,
-      onboardingSessionId: paymentSession.onboardingSessionId
-    }
-  });
 };
 
 export const reconcileDodoCheckout = async (req: Request, res: Response) => {

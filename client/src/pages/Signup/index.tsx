@@ -147,6 +147,7 @@ const Signup: React.FC = () => {
           return item.cycles.includes(billingCycle);
         });
         setProviders(methods);
+        setProvider((current) => current || methods[0]?.id || '');
       })
       .catch(() => {
         if (!cancelled) setProvidersError('Payment methods could not be loaded.');
