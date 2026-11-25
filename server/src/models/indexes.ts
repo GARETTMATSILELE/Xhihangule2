@@ -20,6 +20,7 @@ import { MaintenanceJob } from './MaintenanceJob';
 import DashboardKpiSnapshot from './DashboardKpiSnapshot';
 import { OnboardingSession } from './OnboardingSession';
 import { PaymentSession } from './PaymentSession';
+import { SubscriptionPaymentCase } from './SubscriptionPaymentCase';
 import { AuditLog } from './AuditLog';
 import { MaintenanceContractor } from './MaintenanceContractor';
 import { MaintenanceWorkOrder } from './MaintenanceWorkOrder';
@@ -166,6 +167,7 @@ export async function createIndexes() {
       { model: DashboardKpiSnapshot, name: 'DashboardKpiSnapshot' },
       { model: OnboardingSession, name: 'OnboardingSession' },
       { model: PaymentSession, name: 'PaymentSession' },
+      { model: SubscriptionPaymentCase, name: 'SubscriptionPaymentCase' },
       { model: AuditLog, name: 'AuditLog' },
       { model: MaintenanceContractor, name: 'MaintenanceContractor' },
       { model: MaintenanceWorkOrder, name: 'MaintenanceWorkOrder' },

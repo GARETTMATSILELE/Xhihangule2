@@ -16,6 +16,7 @@ export interface ISubscription extends Document {
   provider?: 'paynow' | 'dodo' | 'cash' | 'manual';
   providerCustomerId?: string;
   providerSubscriptionId?: string;
+  providerPurchasePaymentId?: string;
   lastPaymentSessionId?: Types.ObjectId;
   lastPaymentAt?: Date;
   lastReconciledAt?: Date;
@@ -54,6 +55,7 @@ const subscriptionSchema = new Schema<ISubscription>({
   provider: { type: String, enum: ['paynow', 'dodo', 'cash', 'manual'] },
   providerCustomerId: { type: String, trim: true },
   providerSubscriptionId: { type: String, trim: true, index: true },
+  providerPurchasePaymentId: { type: String, trim: true },
   lastPaymentSessionId: { type: Schema.Types.ObjectId, ref: 'PaymentSession' },
   lastPaymentAt: { type: Date },
   lastReconciledAt: { type: Date },

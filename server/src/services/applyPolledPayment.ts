@@ -7,6 +7,7 @@ import { upsertFinancialReview } from './financialOperationVisibility';
 import { logger } from '../utils/logger';
 import { noteMissingAudit } from './auditPolicy';
 import { signalOperationalFailure } from './operationalSignal';
+import { findSamePurchasePayment, markDuplicateSubscriptionPayment } from './subscriptionReconciliationService';
 
 export async function resolvePaynowProviderRef(reference: string) {
   const sessions = await PaymentSession.find({ provider: 'paynow', providerRef: reference });
@@ -141,6 +142,9 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
     if (decision.outcome !== 'paid') {
       return { found: true as const, paymentStatus: 'paid', activated: false, ignored: true, session };
     }
+    if (session.metadata?.duplicatePayment === true || session.metadata?.reconciliationRequired === true) {
+      return { found: true as const, paymentStatus: 'paid', activated: false, duplicate: true, session };
+    }
     const resumed = await activateSubscriptionFromPayment({
       paymentSessionId: String(session._id),
       provider: 'paynow',
@@ -219,6 +223,11 @@ export async function applyPolledPayment(reference: string, poll: ProviderPoll) 
       const error: any = new Error('Payment activation was not started because the audit event could not be stored');
       error.code = 'AUDIT_PERSIST_FAILED';
       throw error;
+    }
+    const samePurchase = await findSamePurchasePayment(session);
+    if (samePurchase) {
+      await markDuplicateSubscriptionPayment(session, samePurchase);
+      return { found: true as const, paymentStatus: 'paid', activated: false, duplicate: true, session };
     }
     const activation = await activateSubscriptionFromPayment({
       paymentSessionId: String(session._id),

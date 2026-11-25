@@ -21,6 +21,7 @@ type CheckoutQuote = {
   currency: string;
   status: string;
   provider?: PaymentProviderId;
+  outcome?: string;
   reference?: string;
   awaitingConfirmation?: boolean;
 };
@@ -56,8 +57,6 @@ const PaypalCheckout: React.FC = () => {
   const [cashPin, setCashPin] = useState('');
 
   const routeAfterActivation = async () => {
-    // Checkout routes are "public" in the router, so we can't rely on ProtectedRoute to steer correctly.
-    // After activation, fetch the user + company and choose the correct next step.
     try {
       const meResp = await api.get('/auth/me');
       const user = meResp.data?.user;
@@ -74,13 +73,11 @@ const PaypalCheckout: React.FC = () => {
         company = null;
       }
 
-      // Admin without company at all -> company setup
       if ((user.role === 'admin' || (Array.isArray(user.roles) && user.roles.includes('admin'))) && !user.companyId && !company?._id) {
         navigate('/admin/company-setup', { replace: true });
         return;
       }
 
-      // If company exists but onboarding isn't completed -> workspace setup
       if (company?._id && company?.onboardingCompleted === false) {
         const status = String(company?.onboardingStatus || '');
         if (pendingWorkspaceStatuses.includes(status as any)) {
@@ -89,7 +86,6 @@ const PaypalCheckout: React.FC = () => {
         }
       }
 
-      // Default: go to dashboard (admin for now; other roles will be handled by normal login routing)
       navigate('/admin-dashboard', { replace: true });
     } catch {
       navigate('/login', { state: { message: 'Please sign in to continue setup.' } });
@@ -107,8 +103,12 @@ const PaypalCheckout: React.FC = () => {
         const response = await api.get(path);
         if (!cancelled) {
           setQuote(response.data);
-          setMessage(null);
           const state = String(response.data?.status || '');
+          if (response.data?.outcome === 'uncertain') {
+            setMessage({ type: 'info', text: 'Your previous payment is still being verified. Please do not make another payment.' });
+          } else {
+            setMessage(null);
+          }
           if (state === 'paid' || state === 'reconciled') {
             routeAfterActivation();
           }
@@ -285,7 +285,7 @@ const PaypalCheckout: React.FC = () => {
             Registration is not complete until payment is confirmed. You can leave and resume later with the same email address and password.
           </Alert>
         )}
-        {!message && (quote?.status === 'cancelled' || quote?.status === 'failed' || quote?.status === 'expired') && (
+        {!message && (quote?.status === 'cancelled' || quote?.status === 'failed' || quote?.status === 'expired') && quote?.outcome !== 'uncertain' && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             No successful payment has been confirmed. Retry checkout when you are ready. This registration is still saved.
           </Alert>
@@ -320,7 +320,7 @@ const PaypalCheckout: React.FC = () => {
               }}
               method={paymentMethod}
               onMethodChange={setPaymentMethod}
-              disabled={loading || quote?.status === 'provider_created'}
+              disabled={loading || quote?.status === 'provider_created' || (quote?.provider === 'dodo' && quote?.outcome === 'uncertain')}
               loading={providersLoading}
               error={providersError}
             />
@@ -341,10 +341,10 @@ const PaypalCheckout: React.FC = () => {
               color="secondary"
               fullWidth
               sx={{ mt: 2 }}
-              onClick={quote?.status === 'provider_created' ? checkExistingPayment : handleProviderCheckout}
-              disabled={loading || quoteLoading || providersLoading || !quote || quote.status === 'paid' || quote.status === 'reconciled' || (quote.status !== 'provider_created' && (!provider || (provider === 'paynow' && paymentMethod === 'ecocash' && phone.trim().length < 9)))}
+              onClick={(quote?.status === 'provider_created' || (quote?.provider === 'dodo' && quote?.outcome === 'uncertain')) ? checkExistingPayment : handleProviderCheckout}
+              disabled={loading || quoteLoading || providersLoading || !quote || quote.status === 'paid' || quote.status === 'reconciled' || (!(quote.status === 'provider_created' || (quote.provider === 'dodo' && quote.outcome === 'uncertain')) && (!provider || (provider === 'paynow' && paymentMethod === 'ecocash' && phone.trim().length < 9)))}
             >
-              {loading ? <CircularProgress size={20} /> : quote?.status === 'provider_created' ? 'Check payment' : checkoutButtonLabel(provider, 'paid', paymentMethod)}
+              {loading ? <CircularProgress size={20} /> : (quote?.provider === 'dodo' && (quote.status === 'provider_created' || quote.outcome === 'uncertain')) ? 'Check payment status' : quote?.status === 'provider_created' ? 'Check payment' : checkoutButtonLabel(provider, 'paid', paymentMethod)}
             </Button>
             <Typography variant="body2" sx={{ mt: 1, color: 'inherit', opacity: 0.9 }}>
               {provider === 'dodo'

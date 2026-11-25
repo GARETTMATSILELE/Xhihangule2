@@ -46,6 +46,7 @@ const AccountantDashboard = lazyWithRetry(() => import('./pages/AccountantDashbo
 const SalesDashboard = lazyWithRetry(() => import('./pages/SalesDashboard'));
 const BillingSetup = lazyWithRetry(() => import('./pages/Billing/BillingSetup'));
 const BillingReturn = lazyWithRetry(() => import('./pages/Billing/BillingReturn'));
+const SubscriptionReconciliationPage = lazyWithRetry(() => import('./pages/Billing/SubscriptionReconciliationPage'));
 const PaypalCheckout = lazyWithRetry(() => import('./pages/Checkout/PaypalCheckout'));
 const SalesLeadsPage = lazyWithRetry(() => import('./pages/SalesDashboard/LeadsPage'));
 const SalesViewingsPage = lazyWithRetry(() => import('./pages/SalesDashboard/ViewingsPage'));
@@ -165,6 +166,13 @@ const App: React.FC = () => {
               <Route path="/billing/setup" element={<BillingSetup />} />
               <Route path="/billing/upgrade" element={<BillingSetup />} />
               <Route path="/billing/return" element={<BillingReturn />} />
+              <Route path="/billing/reconciliation" element={
+                <CompanyProvider>
+                  <ProtectedRoute requiredRoles={['admin']}>
+                    <SubscriptionReconciliationPage />
+                  </ProtectedRoute>
+                </CompanyProvider>
+              } />
               <Route path="/checkout/paypal" element={<PaypalCheckout />} />
               <Route path="/checkout" element={<PaypalCheckout />} />
               <Route path="/dashboard" element={

@@ -14,7 +14,7 @@ import { createMobilePayment } from './paynowController';
 import { hostedCheckoutStarted, readProviderAvailability, selectPaynowMethod, selectSubscriptionProvider, SubscriptionCycle } from '../services/subscriptionPayments/providerAvailability';
 import { reconcilePaynowForCompany } from '../services/paynowRecoveryService';
 import { startDodoSubscriptionCheckout } from '../services/subscriptionPayments/subscriptionCheckoutService';
-import { reconcileDodoPayment } from '../services/subscriptionPayments/dodoWebhookService';
+import { reconcileDodoPayment, dodoCustomerOutcome, assessDodoAttempt, DODO_RECOVERY_MESSAGE } from '../services/subscriptionPayments/dodoWebhookService';
 import { subscriptionListPrice } from '../services/subscriptionPayments/dodoProductMap';
 import crypto from 'crypto';
 
@@ -59,7 +59,8 @@ export const getCheckoutSession = async (req: Request, res: Response) => {
     currency: session.currency || 'USD',
     status: session.status,
     provider: session.provider,
-    reference: session.provider === 'paynow' ? session.providerRef : undefined,
+    outcome: session.provider === 'dodo' ? dodoCustomerOutcome(session.status, (session.metadata as { dodoErrorCode?: string } | undefined)?.dodoErrorCode) : undefined,
+    reference: session.provider === 'paynow' ? session.providerRef : session.providerTransactionId,
     awaitingConfirmation: hostedCheckoutStarted(session)
   });
 };
@@ -100,6 +101,35 @@ export const createCheckout = async (req: Request, res: Response) => {
   }
   if (paynowMethod?.ok && paynowMethod.method === 'ecocash' && !String(req.body?.phone || '').trim()) {
     return res.status(400).json({ message: 'Enter the EcoCash number that should approve this payment.', code: 'PAYNOW_PHONE_REQUIRED' });
+  }
+
+  const dodoAttempts = await PaymentSession.find({
+    companyId: new mongoose.Types.ObjectId(req.user.companyId),
+    provider: 'dodo',
+    plan,
+    billingCycle: cycle,
+    idempotencyKey: { $not: /^dodo:payment:/ }
+  }).sort({ createdAt: -1 });
+  for (const attempt of dodoAttempts) {
+    const state = await assessDodoAttempt(attempt);
+    if (state === 'succeeded' || attempt.metadata?.doNotPay) {
+      return res.status(200).json({
+        message: 'Payment successful. Continue to workspace setup.',
+        code: 'PAYMENT_ALREADY_COMPLETED',
+        paymentSessionId: attempt.metadata?.supersededBySessionId || attempt._id,
+        provider: 'dodo',
+        outcome: 'success'
+      });
+    }
+    if (state === 'unresolved') {
+      return res.status(409).json({
+        message: DODO_RECOVERY_MESSAGE,
+        code: 'PAYMENT_AWAITING_CONFIRMATION',
+        paymentSessionId: attempt._id,
+        provider: 'dodo',
+        outcome: 'uncertain'
+      });
+    }
   }
 
   const pendingRegistration = await PaymentSession.findOne({

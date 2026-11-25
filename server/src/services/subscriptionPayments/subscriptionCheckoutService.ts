@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger';
 import { createDodoPaymentsProvider, DodoCheckoutError } from './dodoPaymentsProvider';
 import { subscriptionListPrice } from './dodoProductMap';
 import { SubscriptionCycle } from './providerAvailability';
+import { assessDodoAttempt, DODO_RECOVERY_MESSAGE } from './dodoWebhookService';
 
 const CHECKOUT_TTL_MS = 23 * 60 * 60 * 1000;
 
@@ -37,32 +38,70 @@ export async function startDodoSubscriptionCheckout(req: Request, input: {
     );
   if (!subscription) return { status: 409, body: { message: 'Subscription was not found.', code: 'SUBSCRIPTION_NOT_FOUND' } };
 
-  let session = input.openSession || null;
+  const purchaseAttempts = await PaymentSession.find({
+    companyId: new mongoose.Types.ObjectId(req.user.companyId),
+    provider: 'dodo',
+    plan: input.plan,
+    billingCycle: input.cycle,
+    idempotencyKey: { $not: /^dodo:payment:/ }
+  }).sort({ createdAt: -1 });
+  let reusable: InstanceType<typeof PaymentSession> | null = null;
+  for (const attempt of purchaseAttempts) {
+    const state = await assessDodoAttempt(attempt);
+    if (state === 'succeeded' || attempt.metadata?.doNotPay) {
+      return {
+        status: 200,
+        body: {
+          message: 'Payment successful. Continue to workspace setup.',
+          code: 'PAYMENT_ALREADY_COMPLETED',
+          paymentSessionId: attempt.metadata?.supersededBySessionId || attempt._id,
+          provider: 'dodo',
+          outcome: 'success'
+        }
+      };
+    }
+    if (state === 'unresolved') {
+      return {
+        status: 409,
+        body: {
+          message: DODO_RECOVERY_MESSAGE,
+          code: 'PAYMENT_AWAITING_CONFIRMATION',
+          paymentSessionId: attempt._id,
+          provider: 'dodo',
+          outcome: 'uncertain'
+        }
+      };
+    }
+    if (state === 'open' && !reusable) reusable = attempt;
+  }
+
+  let session = reusable || input.openSession || null;
+  if (session && session.provider !== 'dodo') {
+    return { status: 409, body: { message: 'A payment attempt is already open with another provider.', code: 'PAYMENT_ATTEMPT_PENDING', paymentSessionId: session._id } };
+  }
   if (!session) {
     const idempotencyKey = req.get('idempotency-key') || `dodo-open:${req.user.companyId}:${input.plan}:${input.cycle}`;
-    session = await PaymentSession.findOne({ idempotencyKey });
-    if (!session || session.status === 'paid' || session.status === 'reconciled' || session.status === 'cancelled' || session.status === 'expired') {
-      const freshKey = session ? `${idempotencyKey}:${Date.now()}` : idempotencyKey;
-      session = await PaymentSession.findOneAndUpdate(
-        { idempotencyKey: freshKey },
-        {
-          $setOnInsert: {
-            companyId: new mongoose.Types.ObjectId(req.user.companyId),
-            userId: new mongoose.Types.ObjectId(req.user.userId),
-            subscriptionId: subscription._id,
-            idempotencyKey: freshKey,
-            provider: 'dodo',
-            plan: input.plan,
-            billingCycle: input.cycle,
-            amount,
-            currency: 'USD',
-            status: 'pending',
-            metadata: { source: 'billing_checkout' }
-          }
-        },
-        { upsert: true, new: true }
-      );
-    }
+    const existing = await PaymentSession.findOne({ idempotencyKey });
+    const freshKey = existing ? `${idempotencyKey}:${Date.now()}` : idempotencyKey;
+    session = await PaymentSession.findOneAndUpdate(
+      { idempotencyKey: freshKey },
+      {
+        $setOnInsert: {
+          companyId: new mongoose.Types.ObjectId(req.user.companyId),
+          userId: new mongoose.Types.ObjectId(req.user.userId),
+          subscriptionId: subscription._id,
+          idempotencyKey: freshKey,
+          provider: 'dodo',
+          plan: input.plan,
+          billingCycle: input.cycle,
+          amount,
+          currency: 'USD',
+          status: 'pending',
+          metadata: { source: 'billing_checkout' }
+        }
+      },
+      { upsert: true, new: true }
+    );
   }
   if (!session) return { status: 503, body: { message: 'Checkout could not be opened.', code: 'CHECKOUT_NOT_CREATED' } };
   if (session.provider !== 'dodo') {
@@ -95,7 +134,8 @@ export async function startDodoSubscriptionCheckout(req: Request, input: {
 
   const createdAt = Number((session.metadata as { dodoCheckoutCreatedAt?: number } | undefined)?.dodoCheckoutCreatedAt || 0);
   const existingUrl = String((session.metadata as { dodoCheckoutUrl?: string } | undefined)?.dodoCheckoutUrl || '');
-  if (existingUrl && createdAt && Date.now() - createdAt < CHECKOUT_TTL_MS && session.status !== 'paid' && session.status !== 'reconciled') {
+  const checkoutStillOpen = session.status === 'pending' || session.status === 'provider_created';
+  if (existingUrl && createdAt && Date.now() - createdAt < CHECKOUT_TTL_MS && checkoutStillOpen) {
     return {
       status: 200,
       body: {
@@ -124,6 +164,7 @@ export async function startDodoSubscriptionCheckout(req: Request, input: {
     });
     session.provider = 'dodo';
     session.status = 'provider_created';
+    session.providerTransactionId = checkout.providerTransactionId;
     session.metadata = {
       ...(session.metadata || {}),
       ...checkout.metadata,
@@ -137,7 +178,8 @@ export async function startDodoSubscriptionCheckout(req: Request, input: {
       paymentSessionId: String(session._id),
       companyId: String(session.companyId),
       provider: 'dodo',
-      mode: checkout.metadata.mode
+      mode: checkout.metadata.mode,
+      checkoutSessionId: checkout.providerTransactionId
     });
     return {
       status: 200,

@@ -14,12 +14,15 @@ import { Plan } from '../models/Plan';
 import { Subscription } from '../models/Subscription';
 import { PaymentSession } from '../models/PaymentSession';
 import { BillingPayment } from '../models/BillingPayment';
+import { Notification } from '../models/Notification';
+import { SubscriptionPaymentCase } from '../models/SubscriptionPaymentCase';
 import { WebhookEventReceipt } from '../models/WebhookEventReceipt';
 import { selectSubscriptionProvider } from '../services/subscriptionPayments/providerAvailability';
 import { resolveDodoProductId, cycleMatchesDodoPrice } from '../services/subscriptionPayments/dodoProductMap';
 import { setDodoGatewayForTests } from '../services/subscriptionPayments/dodoClient';
 import { startDodoSubscriptionCheckout } from '../services/subscriptionPayments/subscriptionCheckoutService';
 import { processVerifiedDodoEvent, reconcileDodoPayment, verifyDodoWebhook } from '../services/subscriptionPayments/dodoWebhookService';
+import { resumeVerifiedRegistration } from '../services/billingActivationService';
 import { handleDodoWebhook } from '../controllers/dodoWebhookController';
 import { activateSubscriptionFromPayment } from '../services/billingActivationService';
 import { processVerifiedPaynowEvent } from '../services/paynowCallbackService';
@@ -49,6 +52,8 @@ function env(extra: Record<string, string> = {}) {
   Object.assign(process.env, extra);
 }
 
+let checkoutSequence = 0;
+
 function fakeGateway(createImpl?: () => Promise<{ session_id: string; checkout_url: string | null }>) {
   const state = { created: 0 };
   setDodoGatewayForTests({
@@ -64,8 +69,9 @@ function fakeGateway(createImpl?: () => Promise<{ session_id: string; checkout_u
     checkoutSessions: {
       create: async () => {
         state.created += 1;
+        checkoutSequence += 1;
         if (createImpl) return createImpl();
-        return { session_id: `cks_${state.created}`, checkout_url: `https://test.checkout.dodopayments.com/session/cks_${state.created}` };
+        return { session_id: `cks_${checkoutSequence}`, checkout_url: `https://test.checkout.dodopayments.com/session/cks_${checkoutSequence}` };
       }
     },
     payments: {
@@ -192,8 +198,18 @@ async function main() {
   check(unknown.status === 500 && await Subscription.countDocuments({ companyId: lifecycle.company._id, status: 'active' }) === 0, 'an unknown payment reference is not activated');
   const unknownEvent = await processVerifiedDodoEvent({ type: 'license_key.created', data: {} }, 'msg_unknown_event');
   check(unknownEvent.status === 200 && unknownEvent.body.status === 'ignored', 'an unknown event is ignored');
-  const failedPayment = await processVerifiedDodoEvent({ type: 'payment.failed', data: { payment_id: 'pay_failed', metadata: { mantis_payment_session_id: sessionId } } }, 'msg_failed');
-  check(failedPayment.status === 200 && (await PaymentSession.findById(sessionId))?.status === 'failed', 'a failed payment does not activate the subscription');
+  const failedPayment = await processVerifiedDodoEvent({ type: 'payment.failed', data: { payment_id: 'pay_failed', error_code: 'PROCESSING_ERROR', error_message: 'merchant detail that must not be stored', metadata: { mantis_payment_session_id: sessionId } } }, 'msg_failed');
+  const failedSession = await PaymentSession.findById(sessionId);
+  const failedBilling = await BillingPayment.findOne({ paymentSessionId: sessionId });
+  check(failedPayment.status === 200 && failedSession?.status === 'failed' && failedBilling?.status === 'failed' && (failedSession.metadata as { dodoErrorCode?: string })?.dodoErrorCode === 'PROCESSING_ERROR' && failedBilling?.rawResponse?.errorCode === 'PROCESSING_ERROR' && !JSON.stringify(failedBilling?.rawResponse || {}).includes('merchant detail') && await Subscription.countDocuments({ companyId: lifecycle.company._id, status: 'active' }) === 0, 'a failed payment records the provider code and does not activate or refund the subscription');
+  const failedReference = String(failedSession?.providerTransactionId || '');
+  const retryGateway = fakeGateway();
+  const blocked = await startDodoSubscriptionCheckout(requestFor(lifecycle.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  const refreshed = await startDodoSubscriptionCheckout(requestFor(lifecycle.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  const refreshedAgain = await startDodoSubscriptionCheckout(requestFor(lifecycle.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  check(blocked.status === 409 && refreshed.status === 409 && refreshedAgain.status === 409 && blocked.body.code === 'PAYMENT_AWAITING_CONFIRMATION' && String(blocked.body.message).includes('do not make another payment') && retryGateway.created === 0 && await PaymentSession.countDocuments({ companyId: lifecycle.company._id, provider: 'dodo' }) === 1 && failedReference && (await PaymentSession.findById(sessionId))?.providerTransactionId === failedReference, 'an uncertain processing error blocks another checkout and repeated refreshes');
+  await resumeVerifiedRegistration(String(lifecycle.company._id));
+  check((await Subscription.findOne({ companyId: lifecycle.company._id }))?.status !== 'active', 'signing in during an uncertain payment does not activate the subscription');
   await PaymentSession.updateOne({ _id: sessionId }, { $set: { status: 'provider_created' } });
   await BillingPayment.updateOne({ paymentSessionId: sessionId }, { $set: { status: 'pending' } });
   process.env.MANTIS_DODO_FAIL_ONCE = '1';
@@ -221,6 +237,34 @@ async function main() {
   const reconciled = await reconcileDodoPayment(concurrentId, String(concurrentWorld.company._id), 'pay_retrieved');
   const paidAfter = await BillingPayment.countDocuments({ companyId: concurrentWorld.company._id, status: 'paid' });
   check(reconciled.status === 200 && paidBefore === paidAfter && await Subscription.countDocuments({ companyId: concurrentWorld.company._id }) === 1, 'a return-page verification does not create another subscription payment');
+
+  const failureWorld = await world('processor-failure');
+  fakeGateway();
+  const failureStart = await startDodoSubscriptionCheckout(requestFor(failureWorld.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  const failureSessionId = String(failureStart.body.paymentSessionId);
+  const storedCheckout = await PaymentSession.findById(failureSessionId);
+  const byCheckout = await processVerifiedDodoEvent({
+    type: 'payment.failed',
+    data: { payment_id: 'pay_processor', checkout_session_id: storedCheckout?.providerTransactionId, error_code: 'PROCESSING_ERROR', currency: 'USD', total_amount: 2000, status: 'failed' }
+  }, 'msg_processor');
+  const byCheckoutAgain = await processVerifiedDodoEvent({
+    type: 'payment.failed',
+    data: { payment_id: 'pay_processor', checkout_session_id: storedCheckout?.providerTransactionId, error_code: 'PROCESSING_ERROR' }
+  }, 'msg_processor');
+  check(byCheckout.status === 200 && byCheckoutAgain.body.status === 'duplicate' && (await PaymentSession.findById(failureSessionId))?.status === 'failed' && await Subscription.countDocuments({ companyId: failureWorld.company._id, status: 'active' }) === 0, 'a failed payment is matched from the checkout session and a duplicate does not activate it');
+  await PaymentSession.updateOne({ _id: failureSessionId }, { $set: { status: 'provider_created' } });
+  await BillingPayment.updateOne({ paymentSessionId: failureSessionId }, { $set: { status: 'pending' } });
+  setDodoGatewayForTests({
+    payments: { retrieve: async (id: string) => ({ payment_id: id, status: 'failed', error_code: 'PROCESSING_ERROR', currency: 'USD', total_amount: 2000, checkout_session_id: storedCheckout?.providerTransactionId, metadata: { mantis_payment_session_id: failureSessionId } }) },
+    webhooks: { unwrap: () => { throw new Error('not used'); } }
+  } as any);
+  const failedReconcile = await reconcileDodoPayment(failureSessionId, String(failureWorld.company._id), 'pay_processor_reconcile');
+  check(failedReconcile.status === 200 && failedReconcile.body.outcome === 'uncertain' && failedReconcile.body.activated === false && (await PaymentSession.findById(failureSessionId))?.status === 'failed', 'a failed provider status stays unresolved without activating the subscription');
+  const delayedAfterFailure = await processVerifiedDodoEvent({
+    type: 'payment.succeeded',
+    data: { payment_id: 'pay_delayed_after_failure', currency: 'USD', total_amount: 1900, status: 'succeeded', metadata: { mantis_payment_session_id: failureSessionId }, customer: { customer_id: 'cus_test' } }
+  }, 'msg_delayed_after_failure');
+  check(delayedAfterFailure.body.activated === true && (await Subscription.findOne({ companyId: failureWorld.company._id }))?.status === 'active' && await Subscription.countDocuments({ companyId: failureWorld.company._id }) === 1 && await BillingPayment.countDocuments({ paymentSessionId: failureSessionId, status: 'paid' }) === 1, 'a delayed success after a recorded failure activates the existing subscription');
 
   const renewedPayment = 'pay_renewal';
   const renewedFirst = await processVerifiedDodoEvent({ type: 'subscription.renewed', data: { payment_id: renewedPayment, subscription_id: 'sub_test', metadata: { mantis_subscription_id: String(active?._id) }, next_billing_date: new Date(Date.now() + 30 * 86400000).toISOString() } }, 'msg_renewed_first');
@@ -257,10 +301,54 @@ async function main() {
     paymentSessionId: paynowSession._id, plan: 'INDIVIDUAL', cycle: 'monthly', amount: 19, currency: 'USD',
     method: 'card', provider: 'paynow', providerRef: 'PAY-REGRESSION', idempotencyKey: 'paynow-regression', status: 'pending'
   });
+  const crossProvider = await processVerifiedDodoEvent({
+    type: 'payment.failed',
+    data: { payment_id: 'pay_cross_provider', error_code: 'PROCESSING_ERROR', metadata: { mantis_payment_session_id: String(paynowSession._id) } }
+  }, 'msg_cross_provider');
+  const untouchedPaynow = await PaymentSession.findById(paynowSession._id);
+  const untouchedPaynowPayment = await BillingPayment.findOne({ paymentSessionId: paynowSession._id });
+  check(crossProvider.body.activated !== true && untouchedPaynow?.status === 'pending' && untouchedPaynow.provider === 'paynow' && untouchedPaynow.providerRef === 'PAY-REGRESSION' && untouchedPaynowPayment?.status === 'pending' && untouchedPaynowPayment.provider === 'paynow', 'a Dodo payment failure cannot change a Paynow transaction');
   await activateSubscriptionFromPayment({ paymentSessionId: String(paynowSession._id), provider: 'paynow', providerRef: 'PAY-REGRESSION' });
   check((await Subscription.findById(paynowSubscription._id))?.status === 'active' && (await Subscription.findById(paynowSubscription._id))?.provider === 'paynow', 'existing Paynow activation still completes');
   check(typeof processVerifiedPaynowEvent === 'function', 'the Paynow webhook processor is still available');
   check(await mongoose.connection.collection('payments').countDocuments() === 0, 'subscription checkout does not create rental payments');
+
+  const cross = await world('cross-attempt');
+  fakeGateway();
+  const attemptA = await startDodoSubscriptionCheckout(requestFor(cross.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  const attemptAId = String(attemptA.body.paymentSessionId);
+  const attemptACheckoutId = String((await PaymentSession.findById(attemptAId))?.providerTransactionId || '');
+  await processVerifiedDodoEvent({ type: 'payment.failed', data: { payment_id: 'pay_decline', error_code: 'DO_NOT_HONOR', checkout_session_id: attemptACheckoutId, metadata: { mantis_payment_session_id: attemptAId } } }, 'msg_decline');
+  const definitiveRetry = fakeGateway();
+  const attemptB = await startDodoSubscriptionCheckout(requestFor(cross.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  const attemptBId = String(attemptB.body.paymentSessionId);
+  const attemptBCheckoutId = String((await PaymentSession.findById(attemptBId))?.providerTransactionId || '');
+  check(attemptB.status === 200 && attemptB.body.reused !== true && attemptBId !== attemptAId && definitiveRetry.created === 1 && attemptACheckoutId && attemptBCheckoutId && attemptACheckoutId !== attemptBCheckoutId, 'a definitive card decline can start one new checkout and keeps both references');
+  const lateFirst = await processVerifiedDodoEvent({ type: 'payment.succeeded', data: { payment_id: 'pay_late_first', currency: 'USD', total_amount: 1900, checkout_session_id: attemptACheckoutId, metadata: { mantis_payment_session_id: attemptAId }, customer: { customer_id: 'cus_cross' } } }, 'msg_late_first');
+  const held = await PaymentSession.findById(attemptBId);
+  const purchasePeriodEnd = (await Subscription.findOne({ companyId: cross.company._id }))?.currentPeriodEnd?.toISOString();
+  const refreshAfterSuccess = await startDodoSubscriptionCheckout(requestFor(cross.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  check(lateFirst.body.activated === true && held?.metadata?.doNotPay === true && !refreshAfterSuccess.body.redirectUrl && await Subscription.countDocuments({ companyId: cross.company._id }) === 1, 'a late success activates once and does not offer the open retry checkout');
+  await processVerifiedDodoEvent({ type: 'payment.failed', data: { payment_id: 'pay_second_failed', error_code: 'DO_NOT_HONOR', metadata: { mantis_payment_session_id: attemptBId } } }, 'msg_second_failed');
+  check((await PaymentSession.findById(attemptAId))?.status !== 'failed' && (await PaymentSession.findById(attemptBId))?.status === 'failed' && (await Subscription.findOne({ companyId: cross.company._id }))?.status === 'active', 'a failure on the later checkout does not reverse the successful payment');
+  const secondSuccess = await processVerifiedDodoEvent({ type: 'payment.succeeded', data: { payment_id: 'pay_second_success', currency: 'USD', total_amount: 1900, checkout_session_id: attemptBCheckoutId, metadata: { mantis_payment_session_id: attemptBId }, customer: { customer_id: 'cus_cross' } } }, 'msg_second_success');
+  const duplicatePayment = await BillingPayment.findOne({ paymentSessionId: attemptBId });
+  const originalPayment = await BillingPayment.findOne({ paymentSessionId: attemptAId });
+  check(secondSuccess.body.activated !== true && duplicatePayment?.status === 'paid' && duplicatePayment.rawResponse?.reconciliationRequired === true && originalPayment?.status === 'paid' && (await Subscription.findOne({ companyId: cross.company._id }))?.currentPeriodEnd?.toISOString() === purchasePeriodEnd && await Subscription.countDocuments({ companyId: cross.company._id }) === 1, 'two successful checkouts are both kept, the second is flagged, and the subscription is not extended again');
+  const duplicateCase = await SubscriptionPaymentCase.findOne({ 'additional.sessionId': attemptBId });
+  const duplicateNotice = await Notification.find({ companyId: String(cross.company._id), title: 'Subscription payment needs reconciliation' });
+  check(Boolean(duplicateCase) && duplicateCase?.status === 'open' && duplicateCase?.original.providerReference === 'pay_late_first' && duplicateCase?.additional.providerReference === 'pay_second_success' && duplicateCase?.original.currency === 'USD' && duplicateCase?.additional.currency === 'USD' && duplicateNotice.length === 1 && duplicateNotice[0].message.includes(cross.company.name) && !duplicateNotice[0].message.includes('PROCESSING_ERROR'), 'a duplicate Dodo payment opens one reconciliation case and one admin notification');
+  const replay = await processVerifiedDodoEvent({ type: 'payment.succeeded', data: { payment_id: 'pay_second_success', currency: 'USD', total_amount: 1900, checkout_session_id: attemptBCheckoutId, metadata: { mantis_payment_session_id: attemptBId }, customer: { customer_id: 'cus_cross' } } }, 'msg_second_success_replay');
+  const originalAfterReplay = await BillingPayment.findOne({ paymentSessionId: attemptAId });
+  check(replay.body.activated !== true && await SubscriptionPaymentCase.countDocuments({ companyId: cross.company._id }) === 1 && await Notification.countDocuments({ companyId: String(cross.company._id), title: 'Subscription payment needs reconciliation' }) === 1 && originalAfterReplay?.status === 'paid' && originalAfterReplay.amount === originalPayment?.amount && (await Subscription.findOne({ companyId: cross.company._id }))?.currentPeriodEnd?.toISOString() === purchasePeriodEnd, 'a repeated Dodo success callback does not create another alert, extend the subscription, or change the original payment');
+
+  const ordered = await world('ordered-failure');
+  fakeGateway();
+  const paidFirst = await startDodoSubscriptionCheckout(requestFor(ordered.user), { plan: 'INDIVIDUAL', cycle: 'monthly' });
+  const paidFirstId = String(paidFirst.body.paymentSessionId);
+  await paidEvent(paidFirstId, 'pay_before_second_failure');
+  await processVerifiedDodoEvent({ type: 'payment.failed', data: { payment_id: 'pay_other_attempt', error_code: 'DO_NOT_HONOR', metadata: { mantis_payment_session_id: paidFirstId } } }, 'msg_fail_after_success');
+  check((await PaymentSession.findById(paidFirstId))?.status !== 'failed' && (await Subscription.findOne({ companyId: ordered.company._id }))?.status === 'active' && await BillingPayment.countDocuments({ paymentSessionId: paidFirstId, status: 'paid' }) === 1, 'a later failure does not reverse a verified payment or mark it refunded');
 
   setDodoGatewayForTests(real);
   const exampleProcessing = {

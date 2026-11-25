@@ -5,6 +5,7 @@ import { Subscription } from '../../models/Subscription';
 import { WebhookEventReceipt } from '../../models/WebhookEventReceipt';
 import { logger } from '../../utils/logger';
 import { activateSubscriptionFromPayment } from '../billingActivationService';
+import { openSubscriptionDuplicateCase } from '../subscriptionReconciliationService';
 import { amountToCents } from './dodoProductMap';
 import { getDodoGateway } from './dodoClient';
 import { readDodoConfig } from './providerAvailability';
@@ -33,6 +34,129 @@ const KNOWN_EVENTS = new Set([
 
 type DodoEvent = { type?: string; data?: Record<string, any>; business_id?: string; timestamp?: string };
 type ApplyResult = { activated: boolean; ignored: boolean; retryable?: boolean; session?: InstanceType<typeof PaymentSession> | null };
+
+const DEFINITIVE_DECLINES = new Set([
+  'INSUFFICIENT_FUNDS',
+  'DO_NOT_HONOR',
+  'TRANSACTION_NOT_ALLOWED',
+  'STOLEN_CARD',
+  'LOST_CARD',
+  'PICKUP_CARD',
+  'FRAUDULENT',
+  'TRANSACTION_NOT_APPROVED',
+  'INVALID_ACCOUNT',
+  'EXPIRED_CARD',
+  'INVALID_CARD'
+]);
+const UNCERTAIN_CODES = new Set(['PROCESSING_ERROR', 'NETWORK_ERROR', 'TRY_AGAIN_LATER']);
+export const DODO_RECOVERY_MESSAGE = 'Your previous payment is still being verified. Please do not make another payment.';
+
+export type DodoAttemptState = 'open' | 'unresolved' | 'terminal_failure' | 'succeeded';
+
+export function dodoAttemptState(status: string, errorCode?: string | null): DodoAttemptState {
+  const normalized = String(status || '').toLowerCase();
+  const code = String(errorCode || '').trim().toUpperCase();
+  if (normalized === 'succeeded' || normalized === 'paid' || normalized === 'reconciled') return 'succeeded';
+  if (['processing', 'requires_customer_action', 'requires_merchant_action', 'requires_payment_method', 'requires_confirmation', 'requires_capture', 'partially_captured', 'partially_captured_and_capturable'].includes(normalized)) return 'unresolved';
+  if (normalized === 'pending' || normalized === 'provider_created') return UNCERTAIN_CODES.has(code) ? 'unresolved' : 'open';
+  if (normalized === 'failed' || normalized === 'cancelled' || normalized === 'expired') {
+    return DEFINITIVE_DECLINES.has(code) ? 'terminal_failure' : 'unresolved';
+  }
+  return 'unresolved';
+}
+
+export function dodoCustomerOutcome(status: string, errorCode?: string | null): 'success' | 'processing' | 'declined' | 'temporary' | 'uncertain' {
+  const state = dodoAttemptState(status, errorCode);
+  if (state === 'succeeded') return 'success';
+  if (state === 'terminal_failure') return 'declined';
+  if (state === 'open') return 'processing';
+  return 'uncertain';
+}
+
+function sanitizeErrorCode(value: unknown): string {
+  const code = String(value || '').trim().toUpperCase();
+  return /^[A-Z0-9_]{1,64}$/.test(code) ? code : '';
+}
+
+function isRenewalSession(session: { idempotencyKey?: string; metadata?: unknown }): boolean {
+  return String(session.idempotencyKey || '').startsWith('dodo:payment:') || metadataString(session.metadata, 'source') === 'dodo_renewal';
+}
+
+export async function assessDodoAttempt(session: { status: string; providerTransactionId?: string; metadata?: unknown }): Promise<DodoAttemptState> {
+  const localCode = sanitizeErrorCode(metadataString(session.metadata, 'dodoErrorCode'));
+  const remote = await readDodoAttempt(session);
+  if (!remote) return dodoAttemptState(session.status, localCode);
+  return dodoAttemptState(remote.status, remote.errorCode || localCode);
+}
+
+async function readDodoAttempt(session: { providerTransactionId?: string; metadata?: unknown }): Promise<{ status: string; errorCode: string } | null> {
+  const gateway = getDodoGateway() as { checkoutSessions?: { retrieve?: (id: string) => Promise<Record<string, unknown>> }; payments?: { retrieve?: (id: string) => Promise<Record<string, unknown>> } } | null;
+  const retrieveCheckout = gateway?.checkoutSessions?.retrieve;
+  const retrievePayment = gateway?.payments?.retrieve;
+  if (typeof retrieveCheckout !== 'function' && typeof retrievePayment !== 'function') return null;
+  const checkoutId = metadataString(session.metadata, 'dodoCheckoutSessionId') || String(session.providerTransactionId || '');
+  try {
+    if (checkoutId && typeof retrieveCheckout === 'function') {
+      const remote = await retrieveCheckout(checkoutId);
+      const paymentStatus = String(remote.payment_status || '');
+      const paymentId = String(remote.payment_id || metadataString(session.metadata, 'dodoPaymentId') || '');
+      if (!paymentStatus && !paymentId) return { status: 'processing', errorCode: '' };
+      let errorCode = '';
+      if (paymentId && typeof retrievePayment === 'function' && paymentStatus && paymentStatus !== 'succeeded') {
+        const payment = await retrievePayment(paymentId);
+        errorCode = sanitizeErrorCode(payment.error_code);
+      }
+      return { status: paymentStatus || 'processing', errorCode };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function recordDuplicatePayment(session: InstanceType<typeof PaymentSession>, data: Record<string, any>, duplicateOf: InstanceType<typeof PaymentSession>): Promise<ApplyResult> {
+  const paymentId = String(data.payment_id || '');
+  session.status = 'paid';
+  session.paidAt = new Date();
+  session.providerTransactionId = paymentId || session.providerTransactionId;
+  session.metadata = {
+    ...(session.metadata || {}),
+    dodoPaymentId: paymentId,
+    duplicatePayment: true,
+    reconciliationRequired: true,
+    duplicateOfSessionId: String(duplicateOf._id)
+  };
+  session.markModified('metadata');
+  await session.save();
+  if (session.billingPaymentId) {
+    await BillingPayment.updateOne({ _id: session.billingPaymentId, provider: 'dodo' }, {
+      $set: {
+        status: 'paid',
+        paidAt: session.paidAt,
+        providerTransactionId: paymentId,
+        rawResponse: { reconciliationRequired: true, duplicateOfSessionId: String(duplicateOf._id), paymentId }
+      }
+    });
+  }
+  logger.warn('dodo_duplicate_payment', { paymentSessionId: String(session._id), relatedSessionId: String(duplicateOf._id), paymentId });
+  await openSubscriptionDuplicateCase({ original: duplicateOf, additional: session });
+  return { activated: false, ignored: false, session };
+}
+
+async function holdOpenCheckouts(session: InstanceType<typeof PaymentSession>) {
+  if (!session.subscriptionId) return;
+  await PaymentSession.updateMany(
+    {
+      _id: { $ne: session._id },
+      provider: 'dodo',
+      subscriptionId: session.subscriptionId,
+      status: { $in: ['pending', 'provider_created'] },
+      idempotencyKey: { $not: /^dodo:payment:/ }
+    },
+    { $set: { 'metadata.doNotPay': true, 'metadata.supersededBySessionId': String(session._id) } }
+  );
+  logger.info('dodo_open_checkout_not_voided', { paymentSessionId: String(session._id), subscriptionId: String(session.subscriptionId) });
+}
 
 function metadataString(metadata: unknown, key: string): string {
   if (!metadata || typeof metadata !== 'object') return '';
@@ -82,6 +206,17 @@ async function findCheckoutSession(data: Record<string, any>) {
     if (represented) return represented;
     const byRenewal = await PaymentSession.findOne({ provider: 'dodo', idempotencyKey: `dodo:payment:${paymentId}` });
     if (byRenewal) return byRenewal;
+  }
+  const checkoutSessionId = String(data.checkout_session_id || '');
+  if (checkoutSessionId) {
+    const byCheckout = await PaymentSession.findOne({
+      provider: 'dodo',
+      $or: [
+        { providerTransactionId: checkoutSessionId },
+        { 'metadata.dodoCheckoutSessionId': checkoutSessionId }
+      ]
+    });
+    if (byCheckout) return byCheckout;
   }
   const subscriptionId = providerSubscriptionId(data);
   if (subscriptionId) {
@@ -197,6 +332,38 @@ async function applySucceeded(data: Record<string, any>): Promise<ApplyResult> {
     process.env.MANTIS_DODO_FAIL_ONCE = '0';
     throw new Error('temporary dodo processing failure');
   }
+  if (!isRenewalSession(session) && session.subscriptionId) {
+    const priorPaid = await PaymentSession.findOne({
+      _id: { $ne: session._id },
+      provider: 'dodo',
+      subscriptionId: session.subscriptionId,
+      status: { $in: ['paid', 'reconciled'] },
+      idempotencyKey: { $not: /^dodo:payment:/ }
+    });
+    if (priorPaid) return recordDuplicatePayment(session, data, priorPaid);
+    const claim = await Subscription.findOneAndUpdate(
+      { _id: session.subscriptionId, $or: [{ providerPurchasePaymentId: null }, { providerPurchasePaymentId: paymentId }] },
+      { $set: { providerPurchasePaymentId: paymentId } },
+      { new: true }
+    );
+    if (!claim) return { activated: false, ignored: true, retryable: true, session };
+  }
+  if (session.status === 'failed' || session.status === 'cancelled' || session.status === 'expired') {
+    const reopened = await PaymentSession.findOneAndUpdate(
+      { _id: session._id, provider: 'dodo', status: session.status },
+      { $set: { status: 'provider_created' }, $unset: { failedAt: 1 } },
+      { new: true }
+    );
+    if (!reopened) return { activated: false, ignored: true, retryable: true, session };
+    session = reopened;
+    if (session.billingPaymentId) {
+      await BillingPayment.updateOne(
+        { _id: session.billingPaymentId, provider: 'dodo', status: { $in: ['failed', 'cancelled'] } },
+        { $set: { status: 'pending' }, $unset: { failedAt: 1 } }
+      );
+    }
+    logger.info('dodo_payment_reopened', { paymentSessionId: String(session._id), paymentId });
+  }
   const activation = await activateSubscriptionFromPayment({
     paymentSessionId: String(session._id),
     provider: 'dodo',
@@ -209,17 +376,29 @@ async function applySucceeded(data: Record<string, any>): Promise<ApplyResult> {
       $set: { provider: 'dodo', providerSubscriptionId: session.providerSubscriptionId, providerCustomerId: session.providerCustomerId }
     });
   }
+  await holdOpenCheckouts(session);
   return { activated: activation.alreadyProcessed !== true, ignored: false, session };
 }
 
 async function markOpenFailed(data: Record<string, any>, status: 'failed' | 'cancelled'): Promise<ApplyResult> {
   const session = await findCheckoutSession(data);
   if (!session) return { activated: false, ignored: true, retryable: true };
+  if (session.provider !== 'dodo') return { activated: false, ignored: true, session };
   if (session.status === 'paid' || session.status === 'reconciled') return { activated: false, ignored: true, session };
-  await PaymentSession.updateOne({ _id: session._id, status: { $in: ['pending', 'provider_created'] } }, { $set: { status, failedAt: new Date() } });
+  const errorCode = sanitizeErrorCode(data.error_code);
+  const metadata = { ...(session.metadata || {}), ...(errorCode ? { dodoErrorCode: errorCode } : {}) };
+  await PaymentSession.updateOne({ _id: session._id, status: { $in: ['pending', 'provider_created'] } }, { $set: { status, failedAt: new Date(), metadata } });
   if (session.billingPaymentId) {
-    await BillingPayment.updateOne({ _id: session.billingPaymentId, status: 'pending' }, { $set: { status, failedAt: new Date() } });
+    await BillingPayment.updateOne({ _id: session.billingPaymentId, provider: 'dodo', status: 'pending' }, {
+      $set: { status, failedAt: new Date(), ...(errorCode ? { 'rawResponse.errorCode': errorCode } : {}) }
+    });
   }
+  logger.info('dodo_payment_failed', {
+    paymentSessionId: String(session._id),
+    paymentId: String(data.payment_id || ''),
+    errorCode: errorCode || undefined,
+    outcome: dodoCustomerOutcome(status, errorCode)
+  });
   return { activated: false, ignored: false, session };
 }
 
@@ -370,6 +549,10 @@ export function verifyDodoWebhook(rawBody: string, headers: Record<string, strin
   return gateway.webhooks.unwrap(rawBody, { headers: signatureHeaders }) as DodoEvent;
 }
 
+function sessionErrorCode(session: { metadata?: unknown } | null): string {
+  return sanitizeErrorCode((session?.metadata as { dodoErrorCode?: string } | undefined)?.dodoErrorCode);
+}
+
 export async function reconcileDodoPayment(paymentSessionId: string, companyId: string, hintedPaymentId?: string) {
   const session = await PaymentSession.findOne({ _id: paymentSessionId, companyId, provider: 'dodo' });
   if (!session) return { status: 404, body: { message: 'Checkout was not found.', code: 'PAYMENT_SESSION_NOT_FOUND' } };
@@ -382,21 +565,39 @@ export async function reconcileDodoPayment(paymentSessionId: string, companyId: 
       rawProviderResponse: session.rawProviderResponse
     });
     const refreshed = await PaymentSession.findById(session._id).select('status');
-    return { status: 200, body: { status: refreshed?.status || session.status, activated: refreshed?.status === 'reconciled' } };
+    const status = refreshed?.status || session.status;
+    return { status: 200, body: { status, activated: status === 'reconciled', outcome: dodoCustomerOutcome(status) } };
   }
   const paymentId = String(hintedPaymentId || (session.metadata as { dodoPaymentId?: string } | undefined)?.dodoPaymentId || '').trim();
-  if (!paymentId) return { status: 200, body: { status: session.status, activated: false } };
+  if (!paymentId) {
+    return { status: 200, body: { status: session.status, activated: false, outcome: dodoCustomerOutcome(session.status, sessionErrorCode(session)) } };
+  }
   const gateway = getDodoGateway();
   if (!gateway) return { status: 503, body: { message: 'Dodo Payments is not configured.', code: 'DODO_NOT_CONFIGURED' } };
   const payment = await gateway.payments.retrieve(paymentId);
   const metadataSessionId = metadataString(payment.metadata, 'mantis_payment_session_id');
+  const checkoutSessionId = String(payment.checkout_session_id || '');
+  const checkoutMatches = Boolean(checkoutSessionId) && (session.providerTransactionId === checkoutSessionId || metadataString(session.metadata, 'dodoCheckoutSessionId') === checkoutSessionId);
   if (metadataSessionId && metadataSessionId !== String(session._id)) {
-    return { status: 409, body: { message: 'This payment belongs to a different checkout.', code: 'PAYMENT_SESSION_MISMATCH', activated: false } };
+    return { status: 409, body: { message: 'This payment belongs to a different checkout.', code: 'PAYMENT_SESSION_MISMATCH', activated: false, outcome: 'uncertain' } };
   }
-  if (!metadataSessionId && session.providerTransactionId !== payment.payment_id) {
-    return { status: 409, body: { message: 'The payment could not be matched to this checkout.', code: 'PAYMENT_SESSION_MISMATCH', activated: false } };
+  if (!metadataSessionId && session.providerTransactionId !== payment.payment_id && !checkoutMatches) {
+    return { status: 409, body: { message: 'The payment could not be matched to this checkout.', code: 'PAYMENT_SESSION_MISMATCH', activated: false, outcome: 'uncertain' } };
   }
-  if (payment.status !== 'succeeded') return { status: 200, body: { status: session.status, activated: false } };
+  if (payment.status === 'failed' || payment.status === 'cancelled') {
+    const failed = await processVerifiedDodoEvent({
+      type: payment.status === 'cancelled' ? 'payment.cancelled' : 'payment.failed',
+      data: payment as unknown as Record<string, any>
+    }, `reconcile:${payment.status}:${payment.payment_id}`);
+    const refreshed = await PaymentSession.findById(session._id);
+    const status = refreshed?.status || session.status;
+    return { status: failed.status === 500 ? 500 : 200, body: { status, activated: false, outcome: dodoCustomerOutcome(status, sessionErrorCode(refreshed)) } };
+  }
+  if (payment.status !== 'succeeded') {
+    return { status: 200, body: { status: session.status, activated: false, outcome: payment.status === 'processing' ? 'processing' : 'uncertain' } };
+  }
   const result = await processVerifiedDodoEvent({ type: 'payment.succeeded', data: payment as unknown as Record<string, any> }, `reconcile:${payment.payment_id}`);
-  return { status: result.status, body: result.body };
+  const refreshed = await PaymentSession.findById(session._id).select('status');
+  const status = refreshed?.status || session.status;
+  return { status: result.status, body: { ...result.body, status, outcome: status === 'paid' || status === 'reconciled' ? 'success' : 'uncertain' } };
 }
